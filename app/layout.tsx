@@ -7,6 +7,8 @@ export const metadata = {
   description: 'Annotation for HTML and PDF documents',
 };
 
+export const runtime = 'edge';
+
 export default function RootLayout({ children }: {
   children: ReactNode;
 }) {

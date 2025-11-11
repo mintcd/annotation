@@ -5,6 +5,8 @@ import Dashboard from "./components/Dashboard";
 import { getClonedPage } from './utils/clone';
 import { getServerOrigin } from "./utils/api.server";
 
+export const runtime = 'edge';
+
 export async function generateMetadata({ searchParams }: { searchParams: Promise<{ [key: string]: string | undefined }> }) {
   const { url } = await searchParams;
   if (!url) return { title: 'Dashboard' };
