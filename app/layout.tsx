@@ -1,0 +1,21 @@
+import { ReactNode } from 'react';
+import './styles/global.css';
+import ServiceWorkerRegister from './components/ServiceWorkerRegister';
+
+export const metadata = {
+  title: 'Annotation',
+  description: 'Annotation for HTML and PDF documents',
+};
+
+export default function RootLayout({ children }: {
+  children: ReactNode;
+}) {
+  return (
+    <html lang="en">
+      <body>
+        <ServiceWorkerRegister />
+        {children}
+      </body>
+    </html>
+  );
+}

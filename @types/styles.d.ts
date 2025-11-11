@@ -1,0 +1,1 @@
+type Styles = { [key: string]: CSSProperties };

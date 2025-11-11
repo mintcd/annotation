@@ -1,0 +1,31 @@
+{
+  "cSpell.words": [
+    "anns",
+    "chtml",
+    "katex",
+    "mathbb",
+    "mathjax",
+    "mathml",
+    "notionhq",
+    "pdftron",
+    "proxify",
+    "Resizers",
+    "sepinclude",
+    "textsc",
+    "webviewer",
+    "xfdf"
+  ],
+  "cSpell.ignorePaths": [
+    "package-lock.json",
+    "node_modules",
+    "vscode-extension",
+    ".git/{info,lfs,logs,refs,objects}/**",
+    ".git/{index,*refs,*HEAD}",
+    ".vscode",
+    ".vscode-insiders",
+    ".env",
+    ".env.local",
+    ".env.production",
+    "**/*.css"
+  ]
+}

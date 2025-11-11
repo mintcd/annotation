@@ -1,0 +1,616 @@
+export function shortenedHtml(html: string, maxLength: number = 150): string {
+  html = (html || '').trim();
+  if (!html) return '';
+
+  const src = document.createElement('div');
+  src.innerHTML = html;
+
+  const out = document.createElement('div');
+  let count = 0;
+  let finished = false;
+
+  // Helpers to detect math delimiters in a text chunk and avoid splitting them
+  function findNextClosingDoubleDollar(text: string, from: number): number {
+    return text.indexOf('$$', from);
+  }
+
+  function findNextClosingSingleDollar(text: string, from: number): number {
+    return text.indexOf('$', from);
+  }
+
+  // Count occurrences of a substring non-overlapping
+  function countOccurrences(text: string, sub: string): number {
+    if (!sub) return 0;
+    let c = 0;
+    let idx = 0;
+    while ((idx = text.indexOf(sub, idx)) !== -1) {
+      c++;
+      idx += sub.length;
+    }
+    return c;
+  }
+
+  function appendTextFragment(parent: Node, text: string) {
+    parent.appendChild(document.createTextNode(text));
+  }
+
+  function visit(node: Node, outParent: Node) {
+    if (finished) return;
+
+    if (node.nodeType === Node.TEXT_NODE) {
+      const txt = (node as Text).nodeValue || '';
+      if (txt.length === 0) return;
+
+      const remaining = maxLength - count;
+      if (remaining <= 0) {
+        finished = true;
+        return;
+      }
+
+      if (txt.length <= remaining) {
+        appendTextFragment(outParent, txt);
+        count += txt.length;
+        return;
+      }
+
+      // We'll need to cut this text node but avoid splitting math delimited by $$ or $
+      let cutIndex = remaining;
+
+      // Check for $$ occurrences
+      // Count how many $$ exist in the prefix (non-overlapping). If odd -> unmatched opening
+      const prefix = txt.slice(0, cutIndex);
+      const suffix = txt.slice(cutIndex);
+
+      const doubleBefore = countOccurrences(prefix, '$$');
+      if (doubleBefore % 2 === 1) {
+        const next = findNextClosingDoubleDollar(txt, cutIndex);
+        if (next !== -1) {
+          cutIndex = next + 2;
+        } else {
+          // no closing found in this node, try to include full node to avoid breaking
+          appendTextFragment(outParent, txt);
+          count += txt.length;
+          // let traversal continue but we already added the whole node
+          return;
+        }
+      } else {
+        // Handle single $ that are not part of $$
+        // Build a simple view where we mask out $$ so single $ count is accurate
+        const masked = txt.replace(/\$\$/g, '__DOLLAR2__');
+        const singleBefore = countOccurrences(masked.slice(0, cutIndex), '$');
+        if (singleBefore % 2 === 1) {
+          const next = findNextClosingSingleDollar(txt, cutIndex);
+          if (next !== -1) {
+            cutIndex = next + 1;
+          } else {
+            // no closing found in this node, include full node
+            appendTextFragment(outParent, txt);
+            count += txt.length;
+            return;
+          }
+        }
+      }
+
+      // Final safe cut
+      appendTextFragment(outParent, txt.slice(0, cutIndex));
+      count += cutIndex;
+      finished = true;
+      return;
+    }
+
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const el = node as Element;
+
+      // Treat math/script-like elements as atomic: if they contain math source we append whole element
+      const isMathScript = el.tagName.toLowerCase() === 'script' && (el.getAttribute('type') || '').toLowerCase().startsWith('math');
+      const hasMathAttr = el.hasAttribute('data-mathml') || el.tagName.toLowerCase() === 'annotation' || el.classList.contains('katex') || el.className.indexOf('MathJax') !== -1;
+
+      if ((isMathScript || hasMathAttr) && !finished) {
+        // append clone of entire element to ensure math is not split
+        outParent.appendChild(el.cloneNode(true));
+        // update count with textContent length (best-effort)
+        count += (el.textContent || '').length;
+        // If we've reached or exceeded the limit, stop
+        if (count >= maxLength) finished = true;
+        return;
+      }
+
+      // Normal element: clone shallowly, then descend into children until limit
+      const shallow = el.cloneNode(false);
+      outParent.appendChild(shallow);
+      for (let child = node.firstChild; child; child = child.nextSibling) {
+        if (finished) break;
+        visit(child, shallow);
+      }
+      // If element became empty (no children and no text), remove it to avoid stray empty tags
+      if (!shallow.childNodes || shallow.childNodes.length === 0) {
+        shallow.parentNode?.removeChild(shallow);
+      }
+      return;
+    }
+
+    // For other node types, ignore
+  }
+
+  for (let c = src.firstChild; c; c = c.nextSibling) {
+    if (finished) break;
+    visit(c, out);
+  }
+
+  // Trim trailing whitespace in output
+  return out.innerHTML.trim() + "...";
+}
+
+export function rangeToHtml(range: Range | null): string {
+  if (!range) {
+    console.log("Range is null")
+    return '';
+  }
+
+  // Clone the range to avoid affecting the original
+  const clonedRange = range.cloneRange();
+  const fragment = clonedRange.cloneContents();
+
+  // Create a temporary container
+  const tempDiv = document.createElement('div');
+  tempDiv.appendChild(fragment);
+  return tempDiv.innerHTML;
+}
+
+/**
+ * Find the deepest element under `root` such that no single direct child
+ * accounts for more than `threshold` fraction of the element's text.
+ * This is useful to locate a content node that is not merely a wrapper
+ * composed mostly of a single child block.
+ */
+export function findBestTextNode(root: Element, threshold: number = 0.9, minTotal: number = 20): Element | null {
+  if (!root) return null;
+
+  function nodeTextLen(n: Node | null): number {
+    if (!n) return 0;
+    const t = n.textContent || '';
+    return t.trim().length;
+  }
+
+  // Depth-first: prefer deepest matching descendant
+  function dfs(el: Element): Element | null {
+    for (let child = el.firstElementChild; child; child = child.nextElementSibling) {
+      const m = dfs(child as Element);
+      if (m) return m;
+    }
+
+    const total = nodeTextLen(el);
+    if (total === 0) return null;
+
+    // If the node is small, consider it acceptable
+    if (total < minTotal) return el;
+
+    // Compute largest direct-child contribution
+    let maxChild = 0;
+    for (let n = el.firstChild; n; n = n.nextSibling) {
+      const len = nodeTextLen(n);
+      if (len > maxChild) maxChild = len;
+    }
+
+    if ((maxChild / total) <= threshold) {
+      return el;
+    }
+    return null;
+  }
+
+  return dfs(root);
+}
+
+export function cleanedHtml(html: string): { html: string; mathSource?: string } {
+  if (!html.trim()) return { html: '' };
+
+  // Parse the HTML string into a DOM element
+  const tempDiv = document.createElement('div');
+  tempDiv.innerHTML = html;
+  const clone = tempDiv.cloneNode(true) as HTMLElement;
+
+  // Remove only the noisy/assistive MathJax elements that interfere with
+  // saving/re-processing. Preserve core rendered output (e.g. .MathJax,
+  // .katex) and <math> nodes so the Dashboard can display already-rendered
+  // math or re-run the renderer when needed.
+  const toRemoveSelectors = [
+    '.MathJax_Preview',
+    '.MJX_Assistive_MathML',
+    'mjx-assistive-mml'
+  ];
+  toRemoveSelectors.forEach(selector => {
+    clone.querySelectorAll(selector).forEach(el => el.remove());
+  });
+
+  // Collect math sources from various places
+  const mathSources: string[] = [];
+
+  // For script[type="math/tex"], remove MathJax-assigned ids to allow re-processing
+  // Replace script[type="math/..."] with placeholder spans and remember
+  // the wrapped math text (e.g. $...$ or $$...$$). We'll later inject the
+  // math text back after whitespace normalization so KaTeX can find it.
+  const mathMap: string[] = [];
+  Array.from(clone.querySelectorAll('script[type^="math/"]')).forEach((script, idx) => {
+    try {
+      // remove MathJax-assigned ids
+      script.removeAttribute('id');
+      const raw = (script.textContent || '').trim();
+      if (!raw) {
+        // empty script: just remove
+        script.remove();
+        return;
+      }
+
+      // Collect raw math source
+      mathSources.push(raw);
+
+      const typeAttr = (script.getAttribute('type') || '').toLowerCase();
+      let isDisplay = /mode\s*=\s*display/.test(typeAttr) || /^\\\[/.test(raw) || /^\$\$/.test(raw);
+
+      // Check if the corresponding MathJax element has display class
+      if (!isDisplay) {
+        const scriptId = script.getAttribute('id');
+        if (scriptId) {
+          const mathJaxElement = clone.querySelector(`[id="${scriptId}-Frame"]`);
+          if (mathJaxElement && mathJaxElement.classList.contains('mjx-display')) {
+            isDisplay = true;
+          }
+        }
+      }
+
+      const wrapped = isDisplay ? `$$ ${raw} $$` : `$ ${raw} $`;
+      mathMap.push(wrapped);
+
+      const placeholder = document.createElement('span');
+      placeholder.setAttribute('data-math-placeholder', String(mathMap.length - 1));
+      // insert placeholder where script was
+      script.parentNode?.replaceChild(placeholder, script);
+    } catch (e) {
+      try { script.remove(); } catch (_e) { }
+    }
+  });
+
+  // Extract math source from MathML <annotation> elements
+  Array.from(clone.querySelectorAll('annotation')).forEach(ann => {
+    const content = (ann.textContent || '').trim();
+    if (content) mathSources.push(content);
+  });
+
+  // Extract math source from data-mathml attributes
+  Array.from(clone.querySelectorAll('[data-mathml]')).forEach(el => {
+    const mathml = (el.getAttribute('data-mathml') || '').trim();
+    if (mathml) mathSources.push(mathml);
+  });
+
+  // If the fragment contains math script placeholders (we replaced scripts
+  // above) or MathML, remove any already-rendered MathJax/KaTeX output to
+  // avoid duplicated visuals when the Dashboard runs MathJax.
+  const hasMathScript = clone.querySelector('[data-math-placeholder]');
+  const hasMathML = clone.querySelector('math');
+  const hasRenderedMath = clone.querySelector('[class*="MathJax"], [class*="mjx-"], .katex, [data-mathml]');
+  if (hasMathScript || hasMathML || hasRenderedMath) {
+    // Remove rendered output nodes that would duplicate script-driven rendering
+    clone.querySelectorAll('[class*="MathJax"], [class*="mjx-"], .katex, .katex-display, span.math, [data-mathml], [id^="MathJax-"]').forEach(el => el.remove());
+  }
+
+  // Remove event handler attributes for safety
+  const allElements = clone.querySelectorAll('*');
+  allElements.forEach(el => {
+    Array.from(el.attributes).forEach(attr => {
+      if (attr.name.startsWith('on') ||
+        attr.name === 'javascript:' ||
+        attr.name === 'data-react' ||
+        attr.name.startsWith('data-testid')) {
+        el.removeAttribute(attr.name);
+      }
+    });
+  });
+
+  // Normalize whitespace in the HTML but preserve the math placeholders.
+  const normalized = clone.innerHTML.replace(/\s+/g, ' ').trim();
+
+  // Build a new DOM from the normalized HTML so we can replace placeholders
+  // with actual text nodes (containing $...$ or $$...$$) safely.
+  const finalDiv = document.createElement('div');
+  finalDiv.innerHTML = normalized;
+
+  // Replace placeholders with text nodes containing the wrapped math
+  Array.from(finalDiv.querySelectorAll('[data-math-placeholder]')).forEach((ph) => {
+    const id = ph.getAttribute('data-math-placeholder');
+    if (!id) return;
+    const idx = Number(id);
+    const mathText = mathMap[idx];
+    if (mathText == null) return;
+    ph.parentNode?.replaceChild(document.createTextNode(mathText), ph);
+  });
+
+  // Return the finalized HTML string and math source
+  // Note: we intentionally do not re-run a global whitespace collapse here so
+  // the math text is preserved exactly as inserted above.
+  const finalHtml = finalDiv.innerHTML.trim();
+  const mathSource = mathSources.length > 0 ? mathSources.join('\n') : undefined;
+
+  return { html: finalHtml, mathSource };
+}
+
+export function matchedRange(root: HTMLElement, searchText: string): Range | null {
+  if (!searchText || !searchText.trim()) return null;
+
+  // console.log(`[matchedRange] Starting search for: "${searchText}"`);
+
+  // Normalize searchText by removing all whitespace
+  const normalizedSearch = searchText.replace(/\s/g, '');
+  // console.log(`[matchedRange] Normalized search: "${normalizedSearch}"`);
+
+  // --- Precompute KMP failure function (lps) for the normalized pattern
+  const pat = normalizedSearch;
+  const m = pat.length;
+  const lps = new Array<number>(m).fill(0);
+  for (let i = 1, len = 0; i < m;) {
+    if (pat[i] === pat[len]) {
+      lps[i++] = ++len;
+    } else if (len) {
+      len = lps[len - 1];
+    } else {
+      lps[i++] = 0;
+    }
+  }
+
+  // --- Collect text nodes (keep whitespace; skip highlighted wrappers)
+  const walker = document.createTreeWalker(
+    root,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode(node) {
+        const t = (node as Text).nodeValue;
+        if (!t || t.length === 0) return NodeFilter.FILTER_REJECT;
+        const parent = (node as Text).parentElement;
+        if (parent?.classList.contains('highlighted-text')) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    }
+  );
+
+  const textNodes: Text[] = [];
+  for (let n = walker.nextNode() as Text | null; n; n = walker.nextNode() as Text | null) {
+    textNodes.push(n);
+  }
+  if (textNodes.length === 0) {
+    return null;
+  }
+
+  // --- Build positions array: only non-whitespace characters with their original positions
+  type Position = { node: Text; offset: number; char: string };
+  const positions: Position[] = [];
+  for (const node of textNodes) {
+    const s = node.nodeValue as string;
+    for (let i = 0; i < s.length; i++) {
+      if (!/\s/.test(s[i])) {
+        positions.push({ node, offset: i, char: s[i] });
+      }
+    }
+  }
+
+  const normalizedText = positions.map(p => p.char).join('');
+
+  // --- Stream KMP on the normalized text
+  let j = 0; // index in pattern
+
+  for (let idx = 0; idx < normalizedText.length; idx++) {
+    const ch = normalizedText[idx];
+
+    while (j > 0 && ch !== pat[j]) {
+      j = lps[j - 1];
+    }
+
+    if (ch === pat[j]) {
+      j++;
+      // console.log(`[matchedRange] Match progress: ${j}/${m}`);
+      if (j === m) {
+        // Full match found from idx - m + 1 to idx
+        const startPos = positions[idx - m + 1];
+        const endPos = positions[idx];
+        // console.log(`[matchedRange] Full match found from position ${idx - m + 1} to ${idx}`);
+        const range = document.createRange();
+        range.setStart(startPos.node, startPos.offset);
+        range.setEnd(endPos.node, endPos.offset + 1);
+        return range;
+      }
+    }
+  }
+
+  console.warn(`Text "${searchText.substring(0, 50)}..." not found in document`);
+  return null;
+}
+
+export function highlightRange(range: Range, color: string = "#ffff00", id?: string): string {
+  if (!id) {
+    id = Date.now().toString();
+  }
+
+  // Split boundaries so the selected parts become whole text nodes
+  if (range.endContainer.nodeType === Node.TEXT_NODE) {
+    (range.endContainer as Text).splitText(range.endOffset);
+  }
+  if (range.startContainer.nodeType === Node.TEXT_NODE) {
+    (range.startContainer as Text).splitText(range.startOffset);
+  }
+  const collected = collectNodes(range);
+
+  // Group consecutive single inline nodes that are siblings
+  const grouped: (Node | Node[])[] = [];
+  let i = 0;
+  while (i < collected.length) {
+    if (Array.isArray(collected[i])) {
+      grouped.push(collected[i]);
+      i++;
+    } else {
+      // Start a group of consecutive single inline nodes
+      const group: Node[] = [collected[i] as Node];
+      i++;
+      while (i < collected.length && !Array.isArray(collected[i]) && !isBlockElement(collected[i] as Node) && group[group.length - 1].nextSibling === collected[i]) {
+        group.push(collected[i] as Node);
+        i++;
+      }
+      if (group.length === 1) {
+        grouped.push(group[0]);
+      } else {
+        grouped.push(group);
+      }
+    }
+  }
+
+  // Now implement the highlighting strategy
+  grouped.forEach((item) => {
+    if (Array.isArray(item)) {
+      // Consecutive inline siblings: wrap them
+      wrapNodes(item, color, id);
+    } else {
+      // Single node
+      if (isBlockElement(item)) {
+        // For block node, recursively wrap its consecutive inline children
+        wrapInlineChildren(item, color, id);
+      } else {
+        // Single inline node: wrap it
+        wrapNodes([item], color, id);
+      }
+    }
+  });
+
+  return id;
+}
+
+function collectNodes(range: Range): (Node | Node[])[] {
+  const ancestor = range.commonAncestorContainer;
+  const root = ancestor.nodeType === Node.ELEMENT_NODE ? ancestor : ancestor.parentElement;
+
+  if (!root) return [];
+
+  const result: (Node | Node[])[] = [];
+
+  // Collect fully contained direct children of root
+  for (let child = root.firstChild; child; child = child.nextSibling) {
+    if (nodeFullyContained(range, child)) {
+      result.push(child);
+    } else {
+      // Check if intersects
+      const nr = document.createRange();
+      if (child.nodeType === Node.TEXT_NODE) {
+        nr.selectNodeContents(child);
+      } else {
+        nr.selectNode(child);
+      }
+      const intersects =
+        range.compareBoundaryPoints(Range.END_TO_START, nr) < 0 &&
+        range.compareBoundaryPoints(Range.START_TO_END, nr) > 0;
+
+      if (intersects) {
+        // Collect fully contained grandchildren
+        const grandchildren: Node[] = [];
+        for (let gc = child.firstChild; gc; gc = gc.nextSibling) {
+          if (nodeFullyContained(range, gc)) {
+            grandchildren.push(gc);
+          }
+        }
+        if (grandchildren.length > 0) {
+          result.push(grandchildren);
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
+function wrapInlineChildren(parent: Node, color: string, id: string) {
+  if (parent.nodeType !== Node.ELEMENT_NODE) return;
+
+  const children = Array.from(parent.childNodes);
+  let i = 0;
+  while (i < children.length) {
+    if (isBlockElement(children[i])) {
+      // Recursively wrap inline children of this block
+      wrapInlineChildren(children[i], color, id);
+      i++;
+    } else {
+      // Collect consecutive inline children
+      const inlineGroup: Node[] = [];
+      while (i < children.length && !isBlockElement(children[i])) {
+        inlineGroup.push(children[i]);
+        i++;
+      }
+      if (inlineGroup.length > 0) {
+        wrapNodes(inlineGroup, color, id);
+      }
+    }
+  }
+}
+
+function wrapNodes(nodes: Node[], color: string, id: string) {
+  if (nodes.length === 0) return;
+
+  const first = nodes[0];
+  const parent = first.parentNode;
+  if (!parent) return;
+
+  const wrapper = document.createElement('span');
+  wrapper.className = 'highlighted-text';
+  wrapper.dataset.highlightId = id;
+  wrapper.style.backgroundColor = color;
+
+  parent.insertBefore(wrapper, first);
+
+  for (const node of nodes) {
+    wrapper.appendChild(node);
+  }
+}
+
+function nodeFullyContained(rng: Range, node: Node): boolean {
+  try {
+    const nr = document.createRange();
+    if (node.nodeType === Node.TEXT_NODE) {
+      nr.selectNodeContents(node);
+    } else {
+      nr.selectNode(node);
+    }
+    // rng.start <= nr.start  AND rng.end >= nr.end
+    return (
+      rng.compareBoundaryPoints(Range.START_TO_START, nr) <= 0 &&
+      rng.compareBoundaryPoints(Range.END_TO_END, nr) >= 0
+    );
+  } catch (e) {
+    return false;
+  }
+}
+
+function isBlockElement(node: Node): boolean {
+  if (node.nodeType !== Node.ELEMENT_NODE) return false;
+  const el = node as Element;
+  const tag = el.tagName.toLowerCase();
+  // cheap fast-path for common blocks; you can expand this list
+  if (['p', 'div', 'li', 'ul', 'ol', 'section', 'article', 'blockquote', 'pre', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tag)) return true;
+  // fallback (in case of custom blocks)
+  const display = getComputedStyle(el).display;
+  return display === 'block' || display === 'list-item' || display === 'table' || display === 'flex' || display === 'grid';
+}
+
+export function removeHighlights(container: HTMLElement, id: string): void {
+  // Find all highlight spans with this id inside the container
+  const spans = container.querySelectorAll<HTMLSpanElement>(
+    `span.highlighted-text[data-highlight-id="${id}"]`
+  );
+
+  spans.forEach((span) => {
+    const parent = span.parentNode;
+    if (!parent) return;
+
+    // Unwrap span → put back its contents (text nodes or elements)
+    while (span.firstChild) {
+      parent.insertBefore(span.firstChild, span);
+    }
+    parent.removeChild(span);
+  });
+}
+
