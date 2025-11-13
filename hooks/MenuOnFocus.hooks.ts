@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useAnnotationContext } from "../context/Annotation.context";
+import { useAnnotationContext } from "../context/Annotator.context";
 
 export function useFocusedId() {
   const [focusedId, setFocusedId] = useState<string | null>(null);

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import ColorPicker from "./ColorPicker";
-import { useAnnotationContext } from "../context/Annotation.context";
+import { useAnnotationContext } from "../context/Annotator.context";
 import { useMobile, useElementWidth } from "../hooks";
 import { useFocusedId } from "../hooks/MenuOnFocus.hooks";
 import { Delete, Highlighter, Comment, Send } from "../public/icons";

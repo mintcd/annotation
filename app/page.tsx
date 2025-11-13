@@ -1,4 +1,4 @@
-import AnnotationWrapper from "@/components/AnnotationWrapper";
+import Annotator from "@/components/Annotator";
 import { loadAnnotationsForPage, loadAnnotations } from "@/utils/annotations";
 import { resolveApiBase } from '@/utils/api';
 import Dashboard from "@/components/Dashboard";
@@ -41,13 +41,12 @@ export default async function Page({
   const { title, favicon, body, scripts } = await getClonedPage(apiBase, url);
 
   return (
-    <AnnotationWrapper
-      html={body}
+    <Annotator
       annotations={annotations}
       scripts={scripts}
-      pageUrl={url}
       title={title}
-      apiBase={apiBase}
-    />
+    >
+      <div className="cloned-content" dangerouslySetInnerHTML={{ __html: body }} suppressHydrationWarning />
+    </Annotator>
   );
 }

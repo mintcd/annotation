@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import commentEditorStyles from "../styles/CommentEditor.styles";
-import { useAnnotationContext } from "../context/Annotation.context";
+import { useAnnotationContext } from "../context/Annotator.context";
 
 type CommentEditorProps = {
   ann: AnnotationItem;

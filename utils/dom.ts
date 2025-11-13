@@ -172,33 +172,30 @@ export function findBestTextNode(root: Element, threshold: number = 0.9, minTota
     return t.trim().length;
   }
 
-  // Depth-first: prefer deepest matching descendant
-  function dfs(el: Element): Element | null {
-    for (let child = el.firstElementChild; child; child = child.nextElementSibling) {
-      const m = dfs(child as Element);
-      if (m) return m;
+  let current: Element = root;
+
+  while (true) {
+    const currentTotal = nodeTextLen(current);
+    if (currentTotal < minTotal) return current;
+
+    // Look through all children to find one that accounts for >threshold of parent's text
+    let dominantChild: Element | null = null;
+    for (let child = current.firstElementChild; child; child = child.nextElementSibling) {
+      const childTotal = nodeTextLen(child);
+      if (currentTotal > 0 && (childTotal / currentTotal) > threshold) {
+        dominantChild = child as Element;
+        break;
+      }
     }
 
-    const total = nodeTextLen(el);
-    if (total === 0) return null;
-
-    // If the node is small, consider it acceptable
-    if (total < minTotal) return el;
-
-    // Compute largest direct-child contribution
-    let maxChild = 0;
-    for (let n = el.firstChild; n; n = n.nextSibling) {
-      const len = nodeTextLen(n);
-      if (len > maxChild) maxChild = len;
+    // If no child dominates, this is our optimal node
+    if (!dominantChild) {
+      return current;
     }
 
-    if ((maxChild / total) <= threshold) {
-      return el;
-    }
-    return null;
+    // Otherwise, descend into the dominant child
+    current = dominantChild;
   }
-
-  return dfs(root);
 }
 
 export function cleanedHtml(html: string): { html: string; mathSource?: string } {

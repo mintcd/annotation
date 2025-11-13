@@ -224,27 +224,12 @@ export function useScriptLoader(
   pageUrl?: string,
   apiBase?: string
 ) {
-  const loadedScripts = useRef<Set<string>>(new Set());
-  const scriptsLoaded = useRef(0);
+  const executedScripts = useRef<HTMLScriptElement[]>([]);
+  const hasExecuted = useRef(false);
 
   useEffect(() => {
-    // Custom scripts to inject - conditionally based on the site
-    const siteSpecificScripts: Script[] = [];
-
-    // Only inject MathJax for Springer sites
-    if (pageUrl && pageUrl.includes('link.springer.com')) {
-      const mathjaxUrl = 'cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-mml-chtml.js';
-      const src = apiBase ? `${apiBase}/proxy/${mathjaxUrl}` : mathjaxUrl;
-      siteSpecificScripts.push({
-        src,
-        type: 'text/javascript',
-        async: false,
-        defer: false
-      });
-    }
-
-    // Combine custom scripts with page scripts
-    const allScripts = [...siteSpecificScripts, ...scripts];
+    if (hasExecuted.current) return;
+    hasExecuted.current = true;
 
     const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -258,97 +243,143 @@ export function useScriptLoader(
       el.addEventListener('error', onError as EventListener, { once: true });
     });
 
-    // Load a single script. Returns when the script has loaded (or failed).
-    const createdInlineScripts: HTMLScriptElement[] = [];
+    // Execute scripts by finding them in the DOM and replacing them with clones
+    const executeAllScripts = async () => {
+      try {
+        // Wait for the DOM to be ready
+        await sleep(100);
 
-    const loadScript = async (script: Script, index: number): Promise<void> => {
-      if (script.src && loadedScripts.current.has(script.src)) {
+        // Find all script elements in the cloned content
+        const existingScripts = document.querySelectorAll('.cloned-content script');
+        console.log('Found scripts to execute:', existingScripts.length);
+
+        for (const oldScript of Array.from(existingScripts)) {
+          const scriptElement = document.createElement('script');
+
+          // Copy all attributes
+          Array.from(oldScript.attributes).forEach(attr => {
+            scriptElement.setAttribute(attr.name, attr.value);
+          });
+
+          const src = oldScript.getAttribute('src');
+          const hasContent = oldScript.textContent && oldScript.textContent.trim();
+
+          if (src) {
+            // External script - wait for it to load
+            await waitForLoadOrError(scriptElement);
+            await sleep(50);
+          } else if (hasContent) {
+            // Inline script - copy content
+            scriptElement.textContent = oldScript.textContent;
+            await sleep(0);
+          }
+
+          // Replace the old (inert) script with the new (executable) one
+          oldScript.parentNode?.replaceChild(scriptElement, oldScript);
+          executedScripts.current.push(scriptElement);
+        }
+
+        // Also inject site-specific scripts if needed
+        if (pageUrl && pageUrl.includes('link.springer.com')) {
+          const mathjaxUrl = 'cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-mml-chtml.js';
+          const src = apiBase ? `${apiBase}/proxy/${mathjaxUrl}` : mathjaxUrl;
+
+          const mathjaxScript = document.createElement('script');
+          mathjaxScript.src = src;
+          mathjaxScript.type = 'text/javascript';
+          document.head.appendChild(mathjaxScript);
+          executedScripts.current.push(mathjaxScript);
+          await waitForLoadOrError(mathjaxScript);
+        }
+      } catch (error) {
+        console.error('Error executing scripts:', error);
+      }
+    };
+
+    executeAllScripts();
+
+    // Cleanup function
+    return () => {
+      executedScripts.current.forEach(s => {
+        try { s.remove(); } catch { }
+      });
+      executedScripts.current = [];
+      hasExecuted.current = false;
+    };
+  }, [scripts, pageUrl, apiBase]);
+}
+
+export function useClickHref(
+  contentRef: RefObject<HTMLElement | null>,
+  onExternalHref: (href: string) => void
+) {
+  useEffect(() => {
+    const el = contentRef?.current;
+    if (!el) return;
+
+    const onClick = (e: MouseEvent) => {
+      // Only handle primary button clicks without modifier keys
+      if (e.button !== 0 || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+
+      const target = e.target as Element | null;
+      if (!target) return;
+
+      // Find nearest anchor
+      const anchor = (target as Element).closest ? (target as Element).closest('a[href]') as HTMLAnchorElement | null : null;
+      if (!anchor) return;
+
+      const href = anchor.getAttribute('href');
+      if (!href) return;
+
+      // Ignore anchors that are javascript: or anchor links
+      if (href.startsWith('javascript:') || href.startsWith('#')) return;
+
+      try {
+        const linkUrl = new URL(href, window.location.href);
+
+        // If same origin, let the browser handle it
+        if (linkUrl.origin === window.location.origin) return;
+
+        // External link: notify by calling the callback
+        e.preventDefault();
+        onExternalHref(linkUrl.href);
+      } catch (err) {
+        // If URL parsing fails, don't intercept
+        return;
+      }
+    };
+
+    el.addEventListener('click', onClick);
+    return () => el.removeEventListener('click', onClick);
+  }, [contentRef, onExternalHref]);
+}
+
+export function useOptimalContentContainer(
+  clonedRef: RefObject<HTMLDivElement | null>,
+  contentReady: boolean
+) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!contentReady) return;
+
+    const findOptimalContainer = async () => {
+      const clonedContent = clonedRef.current?.querySelector('.cloned-content');
+      if (!clonedContent) {
+        console.warn('No .cloned-content found in wrapper');
         return;
       }
 
-      const scriptElement = document.createElement('script');
+      const { findBestTextNode } = await import('../utils/dom');
+      const optimalElement = findBestTextNode(clonedContent as Element, 0.9, 20);
 
-      if (script.type) scriptElement.type = script.type;
-      if (script.async) scriptElement.async = true;
-      if (script.defer) scriptElement.defer = true;
-
-      if (script.src) {
-        const src = script.src as string;
-        scriptElement.src = src;
-
-        // Add crossorigin attribute for better CORS handling on mobile
-        try {
-          if (apiBase && src.startsWith(apiBase)) {
-            // Proxied script, same origin
-          } else if (!src.includes(window.location.origin)) {
-            scriptElement.crossOrigin = 'anonymous';
-          }
-        } catch (e) {
-          // ignore if checking window.location fails in some envs
-        }
-
-        document.head.appendChild(scriptElement);
-
-        // Await either load or error, but don't throw on error
-        await waitForLoadOrError(scriptElement);
-
-        // Mark as loaded and allow a small initialization period
-        scriptsLoaded.current++;
-        loadedScripts.current.add(src);
-        await sleep(50);
-      } else if (script.content) {
-        // For inline script content we need to append an actual script
-        // element to the document so the browser executes it. Creating a
-        // script element with textContent and appending to head triggers
-        // execution. Keep references so we can cleanup on unmount.
-        try {
-          scriptElement.textContent = script.content;
-          document.head.appendChild(scriptElement);
-          createdInlineScripts.push(scriptElement);
-          scriptsLoaded.current++;
-          // Yield to allow immediate execution
-          await sleep(0);
-        } catch (e) {
-          console.error('Failed to execute inline script', e);
-        }
+      if (optimalElement) {
+        (contentRef as React.RefObject<HTMLDivElement | null>).current = optimalElement as HTMLDivElement;
+      } else {
+        (contentRef as React.RefObject<HTMLDivElement | null>).current = clonedContent as HTMLDivElement;
       }
     };
 
-    // Load scripts sequentially to maintain execution order
-    const loadAllScripts = async () => {
-      try {
-        for (let i = 0; i < allScripts.length; i++) {
-          await loadScript(allScripts[i], i);
-        }
-      } catch (error) {
-        console.error('Error loading scripts:', error);
-      }
-    };
-
-    loadAllScripts();
-
-    // Cleanup function to remove scripts and marker on unmount
-    return () => {
-      // Clean up all external scripts we may have injected
-      [...siteSpecificScripts, ...scripts].forEach(script => {
-        if (script.src) {
-          const existingScript = document.querySelector(`script[src="${script.src}"]`);
-          if (existingScript) {
-            existingScript.remove();
-          }
-        }
-      });
-
-      // Remove any inline script elements we created
-      createdInlineScripts.forEach(s => {
-        try { s.remove(); } catch { }
-      });
-
-      // Remove the marker element
-      const marker = document.getElementById('scripts-dom-ready-marker');
-      if (marker) {
-        marker.remove();
-      }
-    };
-  }, [scripts, pageUrl, apiBase]);
+    findOptimalContainer();
+  }, [contentReady, clonedRef]);
+  return contentRef;
 }

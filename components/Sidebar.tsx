@@ -2,7 +2,7 @@
 
 import React, { useMemo, useRef, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useAnnotationContext } from "../context/Annotation.context";
+import { useAnnotationContext } from "../context/Annotator.context";
 import { useMobile, useHotkey } from "../hooks";
 import { useResize, useClickOutside, useMobileToggle, usePreventScroll } from "../hooks/Sidebar.hooks";
 import AnnotationList from "./AnnotationList";

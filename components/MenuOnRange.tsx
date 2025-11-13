@@ -4,7 +4,7 @@ import { useRef } from "react";
 import { Highlighter } from "../public/icons";
 import { useSelection } from "../hooks/MenuOnRange.hooks";
 import menuStyles from "../styles/MenuOnRange.styles";
-import { useAnnotationContext } from "../context/Annotation.context";
+import { useAnnotationContext } from "../context/Annotator.context";
 
 export default function MenuOnRange() {
   const { currentHighlightColor } = useAnnotationContext();

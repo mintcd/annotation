@@ -3,7 +3,7 @@ import PromptBox from './PromptBox';
 import Latex from "./Latex";
 import CommentEditor from "./CommentEditor";
 import EmptyState from "./EmptyState";
-import { useAnnotationContextOptional } from "../context/Annotation.context";
+import { useAnnotationContextOptional } from "../context/Annotator.context";
 import { useCommentEditing } from "../hooks/AnnotationList.hooks";
 import styles from "../styles/AnnotationList.styles";
 import { shortenedHtml } from "../utils/dom";

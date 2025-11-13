@@ -4,7 +4,7 @@ import { memo } from "react";
 const StaticHtml = memo(
   ({ html, ref }: { html: string, ref: React.Ref<HTMLDivElement> }) => {
     return (
-      <div ref={ref} dangerouslySetInnerHTML={{ __html: html }} suppressHydrationWarning />
+      <div ref={ref} className="cloned-content" dangerouslySetInnerHTML={{ __html: html }} suppressHydrationWarning />
     );
   },
   (prev, next) => prev.html === next.html

@@ -16,18 +16,19 @@ export function sortAnnotations(annotations: AnnotationItem[], sortOption: SortO
       return [...annotations].sort((a, b) => (b.lastModified ?? 0) - (a.lastModified ?? 0));
     case 'dom-order':
     default:
-      // Query DOM for order
-      const spans = document.querySelectorAll<HTMLSpanElement>('span.highlighted-text[data-highlight-id]');
-      const orderMap = new Map<string, number>();
-      spans.forEach((span, index) => {
-        const id = span.getAttribute('data-highlight-id');
-        if (id) orderMap.set(id, index);
-      });
-      return [...annotations].sort((a, b) => {
-        const aOrder = orderMap.get(a.id) ?? Infinity;
-        const bOrder = orderMap.get(b.id) ?? Infinity;
-        return aOrder - bOrder;
-      });
+      return annotations
+    // Query DOM for order
+    // const spans = document.querySelectorAll<HTMLSpanElement>('span.highlighted-text[data-highlight-id]');
+    // const orderMap = new Map<string, number>();
+    // spans.forEach((span, index) => {
+    //   const id = span.getAttribute('data-highlight-id');
+    //   if (id) orderMap.set(id, index);
+    // });
+    // return [...annotations].sort((a, b) => {
+    //   const aOrder = orderMap.get(a.id) ?? Infinity;
+    //   const bOrder = orderMap.get(b.id) ?? Infinity;
+    //   return aOrder - bOrder;
+    // });
   }
 }
 
@@ -156,11 +157,7 @@ export async function loadAnnotationsForPage(serverOrigin: string, pageUrl: stri
 }
 
 
-export async function saveAnnotationsForPage(currentAnnotations: AnnotationItem[], currentPageUrl?: string, currentTitle?: string): Promise<{ success: boolean; message: string }> {
-  if (!currentPageUrl) {
-    return { success: false, message: 'Page URL is required for export' };
-  }
-
+export async function saveAnnotationsForPage(currentAnnotations: AnnotationItem[], currentPageUrl: string, currentTitle?: string): Promise<{ success: boolean; message: string }> {
   const filename = getAnnotationFilename(currentPageUrl);
   console.log(`Saving ${currentAnnotations.length} annotations to ${filename}...`);
 

@@ -7,14 +7,15 @@ import { saveAnnotationsForPage } from "../utils/annotations";
 
 type AnnotationContextProps = {
   children: ReactNode;
-  contentRef: React.RefObject<HTMLDivElement>;
   initialAnnotations?: AnnotationItem[];
-  pageUrl?: string;
+  pageUrl: string;
   title?: string;
+  contentReady?: boolean;
+  contentRef: React.RefObject<HTMLDivElement | null>;
 };
 
 type AnnotationContextType = {
-  contentRef: React.RefObject<HTMLDivElement>;
+  contentRef: React.RefObject<HTMLDivElement | null>;
   annotations: AnnotationItem[];
   pageUrl?: string;
   title?: string;
@@ -22,9 +23,6 @@ type AnnotationContextType = {
   setCurrentHighlightColor: React.Dispatch<React.SetStateAction<string>>;
   addAnnotation: (text: string, html: string, color: string) => void;
   deleteAnnotation: (id: string) => void;
-  // updateAnnotationComment: (id: string, comment: string) => void;
-  // updateAnnotationColor: (id: string, color: string) => void;
-  // updateAnnotationTextAndHtml: (id: string, text: string, html: string) => void;
   updateAnnotation: (params: { id: string; comment?: string; color?: string; text?: string; html?: string }) => void;
   syncStatus: 'synced' | 'syncing' | 'to-sync';
   lastAutoSaveStatus: { success: boolean; message: string } | null;
@@ -46,10 +44,10 @@ export function useAnnotationContextOptional(): AnnotationContextType | null {
 
 export function AnnotationContext({
   children,
-  contentRef,
   initialAnnotations = [],
   pageUrl,
-  title
+  title,
+  contentRef,
 }: AnnotationContextProps) {
   const [annotations, setAnnotations] = useState<AnnotationItem[]>(initialAnnotations);
   const [currentHighlightColor, setCurrentHighlightColor] = useState<string>("#87ceeb");
@@ -101,18 +99,6 @@ export function AnnotationContext({
       return updated;
     }));
   }, [contentRef]);
-
-  // const updateAnnotationComment = useCallback((id: string, comment: string) => {
-  //   updateAnnotation({ id, comment });
-  // }, [updateAnnotation]);
-
-  // const updateAnnotationColor = useCallback((id: string, color: string) => {
-  //   updateAnnotation({ id, color });
-  // }, [updateAnnotation]);
-
-  // const updateAnnotationTextAndHtml = useCallback((id: string, text: string, html: string) => {
-  //   updateAnnotation({ id, text, html });
-  // }, [updateAnnotation]);
 
   // Sync logic
   const saveAnnotations = useCallback(async (): Promise<{ success: boolean; message: string }> => {
@@ -207,9 +193,6 @@ export function AnnotationContext({
     addAnnotation,
     deleteAnnotation,
     updateAnnotation,
-    // updateAnnotationComment,
-    // updateAnnotationColor,
-    // updateAnnotationTextAndHtml,
     syncStatus,
     lastAutoSaveStatus,
   };

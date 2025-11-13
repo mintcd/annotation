@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useMobile } from ".";
 import { cleanedHtml, highlightRange, rangeToHtml } from "../utils/dom";
-import { useAnnotationContext } from "../context/Annotation.context";
+import { useAnnotationContext } from "../context/Annotator.context";
 
 // Small debounce hook used to create a stable debounced callback
 function useDebouncedCallback<T extends (...args: unknown[]) => void>(fn: T, delay = 100) {
@@ -35,7 +35,10 @@ export function useSelection(menuRef: React.RefObject<HTMLElement | null>) {
 
     const r = sel.getRangeAt(0).cloneRange();
     const container = contentRef.current;
-    if (!container) return;
+    if (!container) {
+      console.log('No container found, returning early');
+      return;
+    }
 
     const root = r.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
       ? (r.commonAncestorContainer as Element)
@@ -53,7 +56,8 @@ export function useSelection(menuRef: React.RefObject<HTMLElement | null>) {
 
     setRange(r);
 
-  }, [contentRef, menuRef]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [menuRef]);
 
   // Debounced fallback used for selection handle drags on mobile
   const debouncedFinalize = useDebouncedCallback(finalizeFromSelection as (...args: unknown[]) => void, 100);
@@ -100,7 +104,7 @@ export function useSelection(menuRef: React.RefObject<HTMLElement | null>) {
         document.removeEventListener("pointerup", handlePointerUp as EventListener, { capture: true });
       }
     };
-  }, [contentRef, isMobile, menuRef, handlePointerUp, handlePointerDown, debouncedFinalize, handleSelectionChanging]);
+  }, [isMobile, handlePointerUp, handlePointerDown, debouncedFinalize, handleSelectionChanging]);
 
 
   const highlight = () => {

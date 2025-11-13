@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import sticksStyles from '../styles/Sticks.styles';
-import { useAnnotationContext } from '../context/Annotation.context';
+import { useAnnotationContext } from '../context/Annotator.context';
 import { highlightStartPosition, highlightEndPosition } from '../utils/highlight';
 
 type Props = {

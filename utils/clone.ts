@@ -136,9 +136,12 @@ export const getClonedPage = cache(async (apiBase: string, url: string): Promise
     $(el).attr('srcset', rewritten);
   });
 
-  // Extract scripts and remove originals
+  // Extract scripts and move head scripts to body
   const scripts: ScriptItem[] = [];
-  $('script').each((_, el) => {
+  const headScripts: string[] = [];
+
+  // Process head scripts first
+  $('head script').each((_, el) => {
     const script = $(el);
     const src = script.attr('src');
     const content = (script.text() || '').trim();
@@ -148,7 +151,9 @@ export const getClonedPage = cache(async (apiBase: string, url: string): Promise
 
     if (src) {
       const abs = absoluteUrl(clonedBase, src);
-      scripts.push({ src: proxiedUrl(apiBase, abs), type, async, defer });
+      const proxied = proxiedUrl(apiBase, abs);
+      scripts.push({ src: proxied, type, async, defer });
+      script.attr('src', proxied);
     } else if (content) {
       let rewrittenContent = content;
       rewrittenContent = rewrittenContent.replace(/(?:["']?)src(?:["']?)\s*:\s*("|')(.*?)\1/g, (m: any, q: any, u: any) => {
@@ -172,8 +177,52 @@ export const getClonedPage = cache(async (apiBase: string, url: string): Promise
 
       const finalContent = injectSignalSnippet(rewrittenContent, url);
       scripts.push({ content: finalContent, type, async, defer });
+      script.text(finalContent);
     }
+
+    headScripts.push($.html(script));
   }).remove();
+
+  // Process body scripts
+  $('body script').each((_, el) => {
+    const script = $(el);
+    const src = script.attr('src');
+    const content = (script.text() || '').trim();
+    const type = script.attr('type') || undefined;
+    const async = script.attr('async') !== undefined;
+    const defer = script.attr('defer') !== undefined;
+
+    if (src) {
+      const abs = absoluteUrl(clonedBase, src);
+      const proxied = proxiedUrl(apiBase, abs);
+      scripts.push({ src: proxied, type, async, defer });
+      script.attr('src', proxied);
+    } else if (content) {
+      let rewrittenContent = content;
+      rewrittenContent = rewrittenContent.replace(/(?:["']?)src(?:["']?)\s*:\s*("|')(.*?)\1/g, (m: any, q: any, u: any) => {
+        if (!u || u.startsWith('http') || u.startsWith('//') || isSkippable(u) || u.includes('/proxy/')) return m;
+        return `src: ${q}${proxiedUrl(apiBase, absoluteUrl(clonedBase, u))}${q}`;
+      });
+      rewrittenContent = rewrittenContent.replace(/\.src\s*=\s*("|')(.*?)\1/g, (m: any, q: any, u: any) => {
+        if (!u || u.startsWith('http') || u.startsWith('//') || isSkippable(u) || u.includes('/proxy/')) return m;
+        return m.replace(u, proxiedUrl(apiBase, absoluteUrl(clonedBase, u)));
+      });
+      rewrittenContent = rewrittenContent.replace(/setAttribute\(\s*("|')src\1\s*,\s*("|')(.*?)\2\s*\)/g, (m: any, _q1: any, q2: any, u: any) => {
+        if (!u || u.startsWith('http') || u.startsWith('//') || isSkippable(u) || u.includes('/proxy/')) return m;
+        return m.replace(u, proxiedUrl(apiBase, absoluteUrl(clonedBase, u)));
+      });
+      rewrittenContent = rewrittenContent.replace(/(\w+)\s*:\s*['"](\/[^'\"]*)['"]/g, (m: any, prop: any, u: any) => {
+        if (prop === 'src' && !u.startsWith('http') && !u.startsWith('//') && !isSkippable(u) && !u.includes('/proxy/')) {
+          return `${prop}: '${proxiedUrl(apiBase, absoluteUrl(clonedBase, u))}'`;
+        }
+        return m;
+      });
+
+      const finalContent = injectSignalSnippet(rewrittenContent, url);
+      scripts.push({ content: finalContent, type, async, defer });
+      script.text(finalContent);
+    }
+  });
 
   // Rewrite and hoist styles
   const headStyles: string[] = [];
@@ -217,6 +266,13 @@ export const getClonedPage = cache(async (apiBase: string, url: string): Promise
   }).remove();
 
   const $body = $('body');
+
+  // Prepend head scripts to body (in reverse order to maintain execution order)
+  for (let i = headScripts.length - 1; i >= 0; i--) {
+    $body.prepend(headScripts[i]);
+  }
+
+  // Prepend styles to body
   for (let i = headStyles.length - 1; i >= 0; i--) {
     $body.prepend(headStyles[i]);
   }
