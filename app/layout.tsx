@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
-import './styles/global.css';
-import ServiceWorkerRegister from './components/ServiceWorkerRegister';
+import '../styles/global.css';
+import ServiceWorkerRegister from '../components/ServiceWorkerRegister';
 
 export const metadata = {
   title: 'Annotation',

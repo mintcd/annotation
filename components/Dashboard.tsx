@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from 'framer-motion';
-import { Folder, ChevronDown, ChevronRight } from '../../public/icons';
+import { Folder, ChevronDown, ChevronRight } from '../public/icons';
 import Link from "next/link";
 import { useClient, useMobile } from "../hooks";
 import { deleteBlob } from '../utils/database';

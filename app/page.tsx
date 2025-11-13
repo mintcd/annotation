@@ -1,9 +1,9 @@
-import AnnotationWrapper from "./components/AnnotationWrapper";
-import { loadAnnotationsForPage, loadAnnotations } from "./utils/annotations";
-import { resolveApiBase } from './utils/api';
-import Dashboard from "./components/Dashboard";
-import { getClonedPage } from './utils/clone';
-import { getServerOrigin } from "./utils/api.server";
+import AnnotationWrapper from "@/components/AnnotationWrapper";
+import { loadAnnotationsForPage, loadAnnotations } from "@/utils/annotations";
+import { resolveApiBase } from '@/utils/api';
+import Dashboard from "@/components/Dashboard";
+import { getClonedPage } from '@/utils/clone';
+import { getServerOrigin } from "@/utils/api.server";
 
 export const runtime = 'edge';
 

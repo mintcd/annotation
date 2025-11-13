@@ -3,7 +3,7 @@ import ColorPicker from "./ColorPicker";
 import { useAnnotationContext } from "../context/Annotation.context";
 import { useMobile, useElementWidth } from "../hooks";
 import { useFocusedId } from "../hooks/MenuOnFocus.hooks";
-import { Delete, Highlighter, Comment, Send } from "../../public/icons";
+import { Delete, Highlighter, Comment, Send } from "../public/icons";
 import menuOnFocusStyles from "../styles/MenuOnFocus.styles";
 import Resizers from "./Resizers";
 import { highlightBoundingRect } from "../utils/highlight";
