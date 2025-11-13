@@ -3,12 +3,10 @@ import { cache } from 'react';
 import * as cheerio from 'cheerio';
 import * as css from 'css';
 
-export type ScriptItem = { src?: string; content?: string; type?: string; async?: boolean; defer?: boolean };
 export type ClonedPage = {
   title: string;
   favicon?: string;
   body: string;
-  scripts: ScriptItem[];
 };
 
 function isSkippable(u: string) {
@@ -137,7 +135,6 @@ export const getClonedPage = cache(async (apiBase: string, url: string): Promise
   });
 
   // Extract scripts and move head scripts to body
-  const scripts: ScriptItem[] = [];
   const headScripts: string[] = [];
 
   // Process head scripts first
@@ -152,7 +149,6 @@ export const getClonedPage = cache(async (apiBase: string, url: string): Promise
     if (src) {
       const abs = absoluteUrl(clonedBase, src);
       const proxied = proxiedUrl(apiBase, abs);
-      scripts.push({ src: proxied, type, async, defer });
       script.attr('src', proxied);
     } else if (content) {
       let rewrittenContent = content;
@@ -176,7 +172,6 @@ export const getClonedPage = cache(async (apiBase: string, url: string): Promise
       });
 
       const finalContent = injectSignalSnippet(rewrittenContent, url);
-      scripts.push({ content: finalContent, type, async, defer });
       script.text(finalContent);
     }
 
@@ -195,7 +190,6 @@ export const getClonedPage = cache(async (apiBase: string, url: string): Promise
     if (src) {
       const abs = absoluteUrl(clonedBase, src);
       const proxied = proxiedUrl(apiBase, abs);
-      scripts.push({ src: proxied, type, async, defer });
       script.attr('src', proxied);
     } else if (content) {
       let rewrittenContent = content;
@@ -219,7 +213,6 @@ export const getClonedPage = cache(async (apiBase: string, url: string): Promise
       });
 
       const finalContent = injectSignalSnippet(rewrittenContent, url);
-      scripts.push({ content: finalContent, type, async, defer });
       script.text(finalContent);
     }
   });
@@ -306,5 +299,5 @@ export const getClonedPage = cache(async (apiBase: string, url: string): Promise
   const title = $('title').first().text().trim() || 'Annotation Page';
   const favicon = $('link[rel="icon"]').attr('href') || $('link[rel="shortcut icon"]').attr('href') || $('link[rel="apple-touch-icon"]').attr('href') || '';
 
-  return { title, favicon, body, scripts };
+  return { title, favicon, body };
 });

@@ -5,10 +5,11 @@ import { useAnnotationContext } from "../context/Annotator.context";
 
 export function useFocusedId() {
   const [focusedId, setFocusedId] = useState<string | null>(null);
-  const { contentRef } = useAnnotationContext();
+  const { contentRef, contentReady } = useAnnotationContext();
 
   // Set up interaction listeners (different for mobile vs desktop)
   useEffect(() => {
+    if (!contentReady) return;
     const container = contentRef.current;
     if (!container) return;
 
@@ -61,7 +62,7 @@ export function useFocusedId() {
       container.removeEventListener('pointerup', handleInteraction);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [contentRef]);
+  }, [contentRef, contentReady]);
 
   return { focusedId, setFocusedId };
 }

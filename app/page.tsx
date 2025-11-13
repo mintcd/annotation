@@ -38,13 +38,14 @@ export default async function Page({
   }
 
   const annotations = await loadAnnotationsForPage(apiBase, url);
-  const { title, favicon, body, scripts } = await getClonedPage(apiBase, url);
+  const { title, favicon, body } = await getClonedPage(apiBase, url);
 
   return (
     <Annotator
       annotations={annotations}
-      scripts={scripts}
       title={title}
+      apiBase={apiBase}
+      pageUrl={url}
     >
       <div className="cloned-content" dangerouslySetInnerHTML={{ __html: body }} suppressHydrationWarning />
     </Annotator>

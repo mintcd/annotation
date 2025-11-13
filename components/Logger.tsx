@@ -8,10 +8,10 @@ import sidebarStyles from '../styles/Sidebar.styles';
 import { useMobile } from '../hooks/useMobile';
 import { useClickOutside } from '../hooks/Sidebar.hooks';
 
-export default function Logger({ info }: { info: { title?: string; totalTime?: number; error?: string | null; rangeResults?: Array<{ id: string; snippet: string; success: boolean; message?: string, }>, success: boolean } }) {
+export default function Logger({ info }: { info: { title?: string; totalTime?: number; error?: string | null; rangeResults?: Array<{ id: string; snippet: string; success: boolean; message?: string, }>, success: boolean; numberOfScripts?: number; executedScripts?: number } }) {
   // signals hook
   const signals = useLoggerSignals();
-  const { totalTime, error, rangeResults, success } = info;
+  const { totalTime, error, rangeResults, success, numberOfScripts, executedScripts } = info;
 
   // toggle / panel state
   const [open, setOpen] = useState(true);
@@ -42,7 +42,10 @@ export default function Logger({ info }: { info: { title?: string; totalTime?: n
         {signals.length > 0 && (
           <>
             <div style={{ marginBottom: 8, color: '#374151', fontSize: 13 }}>
-              Executed {signals.length} script{signals.length !== 1 ? 's' : ''}
+              {numberOfScripts !== undefined
+                ? `Executed ${executedScripts ?? signals.length}/${numberOfScripts} scripts`
+                : `Executed ${signals.length} script${signals.length !== 1 ? 's' : ''}`
+              }
               {success && <span> ✅ </span>}
             </div>
             <div style={{ maxHeight: 160, overflowY: 'auto' }}>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useCallback, useState } from 'react';
+import { useRef, useCallback, useState, useEffect } from 'react';
 import { useClickHref, useScriptExecutionTracker, useRangeMatching, useOptimalContentContainer } from '../hooks/Annotator.hooks';
 import Logger from './Logger';
 import { AnnotationContext, useAnnotationContext } from '../context/Annotator.context';
@@ -11,18 +11,28 @@ import PromptBox from './PromptBox';
 import annotationStyles from "../styles/Annotator.styles";
 
 type AnnotatorProps = {
-  scripts?: ScriptItem[];
   annotations?: AnnotationItem[];
   title?: string;
+  apiBase: string;
   children: React.ReactNode;
+  pageUrl: string;
 }
 
-export default function Annotator({ scripts, annotations, title, children }: AnnotatorProps) {
+export default function Annotator({ annotations, title, apiBase, children, pageUrl }: AnnotatorProps) {
   const clonedRef = useRef<HTMLDivElement>(null);
-  const { totalTime, error, success } = useScriptExecutionTracker(scripts || []);
-  const { rangeResults, allMatched, annotations: matchedAnnotations } = useRangeMatching(clonedRef, annotations, success);
-  const contentShown = (success && allMatched)
-  const contentRef = useOptimalContentContainer(clonedRef, contentShown);
+  const { totalTime, error, success, numberOfScripts, executedScripts, kvData } = useScriptExecutionTracker(
+    title,
+    apiBase
+  );
+  const { ref: contentRef, ready: containerReady } = useOptimalContentContainer(clonedRef, success);
+  const { rangeResults, allMatched, isMatching, matchedAnnotations } = useRangeMatching(
+    contentRef, annotations, success,
+    pageUrl,
+    apiBase,
+    executedScripts,
+    kvData
+  );
+
 
   const [pendingHref, setPendingHref] = useState<string | null>(null);
   const closeModal = useCallback(() => setPendingHref(null), []);
@@ -49,8 +59,8 @@ export default function Annotator({ scripts, annotations, title, children }: Ann
       <AnnotationContext
         initialAnnotations={matchedAnnotations}
         title={title}
-        contentReady={contentShown}
-        pageUrl={title || ""}
+        contentReady={containerReady}
+        pageUrl={pageUrl}
         contentRef={contentRef}
       >
         <Sidebar />
@@ -76,7 +86,7 @@ export default function Annotator({ scripts, annotations, title, children }: Ann
       )}
 
       {
-        !contentShown && <Logger info={{ totalTime, error, rangeResults, success, title }} />
+        (!allMatched && !isMatching) && <Logger info={{ totalTime, error, rangeResults, success, title, numberOfScripts, executedScripts }} />
       }
     </>
   );

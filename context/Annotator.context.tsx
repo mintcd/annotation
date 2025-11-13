@@ -26,6 +26,7 @@ type AnnotationContextType = {
   updateAnnotation: (params: { id: string; comment?: string; color?: string; text?: string; html?: string }) => void;
   syncStatus: 'synced' | 'syncing' | 'to-sync';
   lastAutoSaveStatus: { success: boolean; message: string } | null;
+  contentReady: boolean;
 };
 
 const AnnotationContextProvider = createContext<AnnotationContextType | null>(null);
@@ -48,6 +49,7 @@ export function AnnotationContext({
   pageUrl,
   title,
   contentRef,
+  contentReady,
 }: AnnotationContextProps) {
   const [annotations, setAnnotations] = useState<AnnotationItem[]>(initialAnnotations);
   const [currentHighlightColor, setCurrentHighlightColor] = useState<string>("#87ceeb");
@@ -195,6 +197,7 @@ export function AnnotationContext({
     updateAnnotation,
     syncStatus,
     lastAutoSaveStatus,
+    contentReady: contentReady || false,
   };
 
   return (
