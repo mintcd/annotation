@@ -134,7 +134,7 @@ export async function loadAnnotationsForPage(serverOrigin: string, pageUrl: stri
     const filename = getAnnotationFilename(pageUrl);
     const jsonString = await getBlob(filename, serverOrigin);
     if (jsonString === null) {
-      console.log(`No annotations found for ${pageUrl}`);
+      // No annotations exist yet - this is expected on first visit
       return [];
     }
 
@@ -150,8 +150,14 @@ export async function loadAnnotationsForPage(serverOrigin: string, pageUrl: stri
 
     return annotations;
   } catch (error) {
+    // Check if it's a 404/500 (blob doesn't exist) vs a real error
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (errorMessage.includes('404') || errorMessage.includes('500')) {
+      // Blob doesn't exist yet - silently return empty array
+      return [];
+    }
+    // Log other errors that might indicate real problems
     console.error('Error loading annotations:', error);
-    // Return empty array instead of throwing to allow page to render
     return [];
   }
 }

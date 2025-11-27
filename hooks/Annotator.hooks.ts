@@ -193,9 +193,11 @@ export function useRangeMatching(
         // Use fetched KV data or create new object
         const currentData = kvData ? { ...kvData } : { numberOfScripts: undefined, numberOfSuccess: 0 };
 
-        // Set numberOfScripts if not already set
-        if (currentData.numberOfScripts === undefined && executedScripts && executedScripts > 0) {
-          currentData.numberOfScripts = executedScripts;
+        // Set or update numberOfScripts if it's missing or the observed executedScripts is larger
+        if (executedScripts && executedScripts > 0) {
+          if (currentData.numberOfScripts === undefined || executedScripts > (currentData.numberOfScripts || 0)) {
+            currentData.numberOfScripts = executedScripts;
+          }
         }
 
         // Increment numberOfSuccess
@@ -262,7 +264,7 @@ export function useScriptExecutionTracker(
             setKvData(data.value);
             if ('numberOfScripts' in data.value) {
               setNumberOfScripts(data.value.numberOfScripts);
-              console.log(`Loaded numberOfScripts: ${data.value.numberOfScripts} for ${pageUrl}`);
+              console.log(`Expecting ${data.value.numberOfScripts} scripts for ${pageUrl}`);
             }
           }
         } else if (response.status === 404) {
@@ -378,94 +380,109 @@ export function useScriptExecutionTracker(
 
 
 
-// export function useScriptLoader(
-//   pageUrl?: string,
-//   apiBase?: string
-// ) {
-//   const executedScripts = useRef<HTMLScriptElement[]>([]);
-//   const hasExecuted = useRef(false);
+export function useScriptLoader(
+  scripts: Array<{ id?: string; src?: string; content?: string; type?: string; async?: boolean; defer?: boolean; location?: 'head' | 'body' }>,
+  pageUrl?: string,
+  apiBase?: string
+) {
+  const executedScripts = useRef<HTMLScriptElement[]>([]);
 
-//   useEffect(() => {
-//     if (hasExecuted.current) return;
-//     hasExecuted.current = true;
+  useEffect(() => {
+    if (!scripts || scripts.length === 0) return;
 
-//     const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+    let cancelled = false;
 
-//     const waitForLoadOrError = (el: HTMLScriptElement) => new Promise<void>((resolve) => {
-//       const onLoad = () => resolve();
-//       const onError = (ev?: Event) => {
-//         console.error('Script load error for', el.src, ev)
-//         resolve();
-//       };
-//       el.addEventListener('load', onLoad, { once: true });
-//       el.addEventListener('error', onError as EventListener, { once: true });
-//     });
+    const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-//     // Execute scripts by finding them in the DOM and replacing them with clones
-//     const executeAllScripts = async () => {
-//       try {
-//         // Wait for the DOM to be ready
-//         await sleep(100);
+    const waitForLoadOrError = (el: HTMLScriptElement) => new Promise<void>((resolve) => {
+      const onLoad = () => resolve();
+      const onError = (ev?: Event) => {
+        console.error('Script load error for', el.src, ev);
+        resolve();
+      };
+      el.addEventListener('load', onLoad, { once: true });
+      el.addEventListener('error', onError as EventListener, { once: true });
+    });
 
-//         // Find all script elements in the cloned content
-//         const existingScripts = document.querySelectorAll('.cloned-content script');
-//         console.log('Found scripts to execute:', existingScripts.length);
+    const pushProxySignal = (u: string) => {
+      try {
+        const w = window as unknown as { __proxy_script_executed?: string[] };
+        w.__proxy_script_executed = w.__proxy_script_executed || [];
+        w.__proxy_script_executed.push(u);
+        const ev = new CustomEvent('proxy:script-executed', { detail: { url: u } });
+        window.dispatchEvent(ev);
+      } catch { }
+    };
 
-//         for (const oldScript of Array.from(existingScripts)) {
-//           const scriptElement = document.createElement('script');
+    const injectScripts = async () => {
+      try {
+        await sleep(50);
 
-//           // Copy all attributes
-//           Array.from(oldScript.attributes).forEach(attr => {
-//             scriptElement.setAttribute(attr.name, attr.value);
-//           });
+        const container = document.querySelector('.cloned-content') as HTMLElement | null;
 
-//           const src = oldScript.getAttribute('src');
-//           const hasContent = oldScript.textContent && oldScript.textContent.trim();
+        for (let i = 0; i < scripts.length; i++) {
+          if (cancelled) return;
+          const s = scripts[i];
+          const scriptEl = document.createElement('script');
+          if (s.type) scriptEl.type = s.type;
+          if (s.async) scriptEl.async = true;
+          if (s.defer) scriptEl.defer = true;
 
-//           if (src) {
-//             // External script - wait for it to load
-//             await waitForLoadOrError(scriptElement);
-//             await sleep(50);
-//           } else if (hasContent) {
-//             // Inline script - copy content
-//             scriptElement.textContent = oldScript.textContent;
-//             await sleep(0);
-//           }
+          if (s.src) {
+            scriptEl.src = s.src;
+            // Append to container if available, otherwise to head
+            const parent = container || document.head || document.body;
+            parent.appendChild(scriptEl);
+            executedScripts.current.push(scriptEl);
+            await waitForLoadOrError(scriptEl);
 
-//           // Replace the old (inert) script with the new (executable) one
-//           oldScript.parentNode?.replaceChild(scriptElement, oldScript);
-//           executedScripts.current.push(scriptElement);
-//         }
+            // Signal execution for external scripts (use canonical id if available)
+            pushProxySignal(s.id || s.src || '');
+          } else if (s.content) {
+            // Inline content
+            scriptEl.text = s.content;
+            const parent = container || document.body;
+            parent.appendChild(scriptEl);
+            executedScripts.current.push(scriptEl);
 
-//         // Also inject site-specific scripts if needed
-//         if (pageUrl && pageUrl.includes('link.springer.com')) {
-//           const mathjaxUrl = 'cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-mml-chtml.js';
-//           const src = apiBase ? `${apiBase}/proxy/${mathjaxUrl}` : mathjaxUrl;
+            // Inline scripts execute immediately; signal execution (use canonical id if available)
+            pushProxySignal(s.id || (pageUrl ? `${pageUrl}#inline-${i}` : `inline-${i}`));
+          }
 
-//           const mathjaxScript = document.createElement('script');
-//           mathjaxScript.src = src;
-//           mathjaxScript.type = 'text/javascript';
-//           document.head.appendChild(mathjaxScript);
-//           executedScripts.current.push(mathjaxScript);
-//           await waitForLoadOrError(mathjaxScript);
-//         }
-//       } catch (error) {
-//         console.error('Error executing scripts:', error);
-//       }
-//     };
+          // small pause to avoid blocking
+          await sleep(10);
+        }
 
-//     executeAllScripts();
+        // Still include site-specific injection as a fallback
+        if (pageUrl && pageUrl.includes('link.springer.com')) {
+          const mathjaxUrl = 'cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-mml-chtml.js';
+          const src = apiBase ? `${apiBase}/proxy/${mathjaxUrl}` : mathjaxUrl;
 
-//     // Cleanup function
-//     return () => {
-//       executedScripts.current.forEach(s => {
-//         try { s.remove(); } catch { }
-//       });
-//       executedScripts.current = [];
-//       hasExecuted.current = false;
-//     };
-//   }, [scripts, pageUrl, apiBase]);
-// }
+          const mathjaxScript = document.createElement('script');
+          mathjaxScript.src = src;
+          mathjaxScript.type = 'text/javascript';
+          document.head.appendChild(mathjaxScript);
+          executedScripts.current.push(mathjaxScript);
+          await waitForLoadOrError(mathjaxScript);
+          pushProxySignal(src);
+        }
+      } catch (error) {
+        console.error('Error injecting scripts:', error);
+      }
+    };
+
+    injectScripts();
+
+    return () => {
+      cancelled = true;
+      executedScripts.current.forEach(s => {
+        try { s.remove(); } catch { }
+      });
+      executedScripts.current = [];
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(scripts || []), pageUrl, apiBase]);
+}
 
 export function useClickHref(
   contentRef: RefObject<HTMLElement | null>,

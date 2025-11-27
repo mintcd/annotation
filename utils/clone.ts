@@ -7,6 +7,15 @@ export type ClonedPage = {
   title: string;
   favicon?: string;
   body: string;
+  scripts?: Array<{
+    id?: string;
+    src?: string;
+    content?: string;
+    type?: string;
+    async?: boolean;
+    defer?: boolean;
+    location?: 'head' | 'body';
+  }>;
 };
 
 function isSkippable(u: string) {
@@ -39,8 +48,35 @@ function proxiedUrl(apiBase: string, targetUrl: string): string {
   }
 }
 
-function injectSignalSnippet(text: string, url: string): string {
-  const signalSnippet = `\n\n;// Proxy execution signal - do not remove\n(function(){try{var d=${JSON.stringify({ url })};if(typeof window!=='undefined'){window.__proxy_script_executed=window.__proxy_script_executed||[];window.__proxy_script_executed.push(d.url);if(typeof window.__proxy_script_executed_dispatch!=='function'){window.__proxy_script_executed_dispatch=function(detail){try{var ev;try{ev=new CustomEvent('proxy:script-executed',{detail:detail});}catch(e){ev=document.createEvent('CustomEvent');ev.initCustomEvent('proxy:script-executed',false,false,detail);}if(typeof window!=='undefined'&&window.dispatchEvent){window.dispatchEvent(ev);} }catch(e){if(typeof console!=='undefined'&&console.warn)console.warn('proxy dispatch error',e);}}}try{window.__proxy_script_executed_dispatch(d);}catch(e){} } }catch(err){if(typeof console!=='undefined'&&console.warn)console.warn('proxy signal error',err);} })();\n`;
+function isJsonOnly(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  // Check if it's a JSON object or array
+  if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+    (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+    try {
+      JSON.parse(trimmed);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+function injectSignalSnippet(text: string, url: string, signalId?: string, scriptType?: string): string {
+  // Skip injection for JSON data scripts or non-executable script types
+  if (scriptType && scriptType !== 'text/javascript' && scriptType !== 'module' && !scriptType.includes('javascript')) {
+    return text;
+  }
+
+  // Skip injection if content is pure JSON
+  if (isJsonOnly(text)) {
+    return text;
+  }
+
+  const payload = signalId ? { id: signalId } : { url };
+  const signalSnippet = `\n\n;// Proxy execution signal - do not remove\n(function(){try{var d=${JSON.stringify(payload)};if(typeof window!=='undefined'){window.__proxy_script_executed=window.__proxy_script_executed||[];window.__proxy_script_executed.push(d.id||d.url);if(typeof window.__proxy_script_executed_dispatch!=='function'){window.__proxy_script_executed_dispatch=function(detail){try{var ev;try{ev=new CustomEvent('proxy:script-executed',{detail:detail});}catch(e){ev=document.createEvent('CustomEvent');ev.initCustomEvent('proxy:script-executed',false,false,detail);}if(typeof window!=='undefined'&&window.dispatchEvent){window.dispatchEvent(ev);} }catch(e){if(typeof console!=='undefined'&&console.warn)console.warn('proxy dispatch error',e);}}}try{window.__proxy_script_executed_dispatch(d);}catch(e){} } }catch(err){if(typeof console!=='undefined'&&console.warn)console.warn('proxy signal error',err);} })();\n`;
   return `${text}\n${signalSnippet}`;
 }
 
@@ -134,10 +170,10 @@ export const getClonedPage = cache(async (apiBase: string, url: string): Promise
     $(el).attr('srcset', rewritten);
   });
 
-  // Extract scripts and move head scripts to body
-  const headScripts: string[] = [];
+  // Extract scripts into a serializable array so the client can inject them
+  const scripts: Array<{ id?: string; src?: string; content?: string; type?: string; async?: boolean; defer?: boolean; location?: 'head' | 'body' }> = [];
 
-  // Process head scripts first
+  // Process head scripts first and remove them
   $('head script').each((_, el) => {
     const script = $(el);
     const src = script.attr('src');
@@ -149,10 +185,11 @@ export const getClonedPage = cache(async (apiBase: string, url: string): Promise
     if (src) {
       const abs = absoluteUrl(clonedBase, src);
       const proxied = proxiedUrl(apiBase, abs);
-      script.attr('src', proxied);
+      const scriptId = `${url}#script-${scripts.length}`;
+      scripts.push({ id: scriptId, src: proxied, type, async, defer, location: 'head' });
     } else if (content) {
       let rewrittenContent = content;
-      rewrittenContent = rewrittenContent.replace(/(?:["']?)src(?:["']?)\s*:\s*("|')(.*?)\1/g, (m: any, q: any, u: any) => {
+      rewrittenContent = rewrittenContent.replace(/(?:[\"']?)src(?:[\"']?)\s*:\s*("|')(.*?)\1/g, (m: any, q: any, u: any) => {
         if (!u || u.startsWith('http') || u.startsWith('//') || isSkippable(u) || u.includes('/proxy/')) return m;
         return `src: ${q}${proxiedUrl(apiBase, absoluteUrl(clonedBase, u))}${q}`;
       });
@@ -171,14 +208,13 @@ export const getClonedPage = cache(async (apiBase: string, url: string): Promise
         return m;
       });
 
-      const finalContent = injectSignalSnippet(rewrittenContent, url);
-      script.text(finalContent);
+      const scriptId = `${url}#script-${scripts.length}`;
+      const finalContent = injectSignalSnippet(rewrittenContent, url, scriptId, type);
+      scripts.push({ id: scriptId, content: finalContent, type, async, defer, location: 'head' });
     }
-
-    headScripts.push($.html(script));
   }).remove();
 
-  // Process body scripts
+  // Process body scripts and remove them
   $('body script').each((_, el) => {
     const script = $(el);
     const src = script.attr('src');
@@ -190,10 +226,11 @@ export const getClonedPage = cache(async (apiBase: string, url: string): Promise
     if (src) {
       const abs = absoluteUrl(clonedBase, src);
       const proxied = proxiedUrl(apiBase, abs);
-      script.attr('src', proxied);
+      const scriptId = `${url}#script-${scripts.length}`;
+      scripts.push({ id: scriptId, src: proxied, type, async, defer, location: 'body' });
     } else if (content) {
       let rewrittenContent = content;
-      rewrittenContent = rewrittenContent.replace(/(?:["']?)src(?:["']?)\s*:\s*("|')(.*?)\1/g, (m: any, q: any, u: any) => {
+      rewrittenContent = rewrittenContent.replace(/(?:[\"']?)src(?:[\"']?)\s*:\s*("|')(.*?)\1/g, (m: any, q: any, u: any) => {
         if (!u || u.startsWith('http') || u.startsWith('//') || isSkippable(u) || u.includes('/proxy/')) return m;
         return `src: ${q}${proxiedUrl(apiBase, absoluteUrl(clonedBase, u))}${q}`;
       });
@@ -212,9 +249,12 @@ export const getClonedPage = cache(async (apiBase: string, url: string): Promise
         return m;
       });
 
-      const finalContent = injectSignalSnippet(rewrittenContent, url);
-      script.text(finalContent);
+      const scriptId = `${url}#script-${scripts.length}`;
+      const finalContent = injectSignalSnippet(rewrittenContent, url, scriptId, type);
+      scripts.push({ id: scriptId, content: finalContent, type, async, defer, location: 'body' });
     }
+    // remove the script from DOM so body HTML is script-free
+    script.remove();
   });
 
   // Rewrite and hoist styles
@@ -260,11 +300,6 @@ export const getClonedPage = cache(async (apiBase: string, url: string): Promise
 
   const $body = $('body');
 
-  // Prepend head scripts to body (in reverse order to maintain execution order)
-  for (let i = headScripts.length - 1; i >= 0; i--) {
-    $body.prepend(headScripts[i]);
-  }
-
   // Prepend styles to body
   for (let i = headStyles.length - 1; i >= 0; i--) {
     $body.prepend(headStyles[i]);
@@ -299,5 +334,5 @@ export const getClonedPage = cache(async (apiBase: string, url: string): Promise
   const title = $('title').first().text().trim() || 'Annotation Page';
   const favicon = $('link[rel="icon"]').attr('href') || $('link[rel="shortcut icon"]').attr('href') || $('link[rel="apple-touch-icon"]').attr('href') || '';
 
-  return { title, favicon, body };
+  return { title, favicon, body, scripts };
 });

@@ -14,5 +14,6 @@ type ScriptItem = {
   type?: string;
   async?: boolean;
   defer?: boolean;
+  location?: 'head' | 'body'
 }
 

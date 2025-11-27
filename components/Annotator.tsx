@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useCallback, useState, useEffect } from 'react';
-import { useClickHref, useScriptExecutionTracker, useRangeMatching, useOptimalContentContainer } from '../hooks/Annotator.hooks';
+import { useClickHref, useScriptExecutionTracker, useRangeMatching, useOptimalContentContainer, useScriptLoader } from '../hooks/Annotator.hooks';
 import Logger from './Logger';
 import { AnnotationContext, useAnnotationContext } from '../context/Annotator.context';
 import Sidebar from './Sidebar';
@@ -16,12 +16,14 @@ type AnnotatorProps = {
   apiBase: string;
   children: React.ReactNode;
   pageUrl: string;
+  scripts?: ScriptItem[];
 }
 
-export default function Annotator({ annotations, title, apiBase, children, pageUrl }: AnnotatorProps) {
+export default function Annotator({ annotations, title, apiBase, children, pageUrl, scripts }: AnnotatorProps) {
   const clonedRef = useRef<HTMLDivElement>(null);
+  useScriptLoader(scripts || [], pageUrl, apiBase);
   const { totalTime, error, success, numberOfScripts, executedScripts, kvData } = useScriptExecutionTracker(
-    title,
+    pageUrl,
     apiBase
   );
   const { ref: contentRef, ready: containerReady } = useOptimalContentContainer(clonedRef, success);

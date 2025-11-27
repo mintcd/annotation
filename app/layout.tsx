@@ -13,8 +13,8 @@ export default function RootLayout({ children }: {
   children: ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body>
+    <html lang="en" suppressHydrationWarning>
+      <body suppressHydrationWarning>
         <ServiceWorkerRegister />
         {children}
       </body>
