@@ -190,11 +190,31 @@ export function useRangeMatching(
 
     const updateKV = async () => {
       try {
-        // Use fetched KV data or create new object
-        const currentData = kvData ? { ...kvData } : { numberOfScripts: undefined, numberOfSuccess: 0 };
+        // Prepare currentData either from kvData or by fetching latest KV to avoid overwriting newer values
+        let currentData: { numberOfScripts?: number; numberOfSuccess?: number } | null = null;
+        if (kvData && typeof kvData === 'object') {
+          currentData = { ...kvData };
+        } else {
+          // fetch latest from KV to merge safely
+          try {
+            const getUrl = `${apiBase}/kv/get?key=${encodeURIComponent(pageUrl)}`;
+            const res = await fetch(getUrl).catch(() => null);
+            if (res && res.ok) {
+              const txt = await res.text();
+              try {
+                const parsed = JSON.parse(txt);
+                if (parsed && parsed.value && typeof parsed.value === 'object') currentData = parsed.value;
+              } catch { /* ignore non-JSON */ }
+            }
+          } catch (e) {
+            // ignore fetch failures; we'll create a new object below
+          }
+        }
 
-        // Set or update numberOfScripts if it's missing or the observed executedScripts is larger
-        if (executedScripts && executedScripts > 0) {
+        if (!currentData) currentData = { numberOfScripts: undefined, numberOfSuccess: 0 };
+
+        // Set or update numberOfScripts conservatively: only increase to the observed executedScripts
+        if (typeof executedScripts === 'number' && executedScripts > 0) {
           if (currentData.numberOfScripts === undefined || executedScripts > (currentData.numberOfScripts || 0)) {
             currentData.numberOfScripts = executedScripts;
           }
@@ -284,6 +304,76 @@ export function useScriptExecutionTracker(
 
     fetchKVData();
 
+    // Hard timeout: after 10s, give up waiting for more signals and hand off to range-matching
+    const HARD_TIMEOUT = 10000;
+    const hardTimer = window.setTimeout(async () => {
+      try {
+        if (done) return;
+        console.log(`Hard timeout after ${HARD_TIMEOUT}ms waiting for script signals`);
+
+        // If we expected more scripts than we've seen, rewrite KV to the observed smaller value
+        if (pageUrl && apiBase) {
+          try {
+            // Fetch current KV (may be non-JSON; tolerate that)
+            const getUrl = `${apiBase}/kv/get?key=${encodeURIComponent(pageUrl)}`;
+            const getRes = await fetch(getUrl).catch(() => null);
+            let current: { numberOfScripts?: number; numberOfSuccess?: number } | null = null;
+            if (getRes && getRes.ok) {
+              try {
+                const txt = await getRes.text();
+                const parsed = JSON.parse(txt);
+                current = parsed && parsed.value && typeof parsed.value === 'object' ? parsed.value : null;
+              } catch { current = null; }
+            }
+
+            const currentCount = current && typeof current.numberOfScripts === 'number' ? current.numberOfScripts : undefined;
+            if (typeof currentCount === 'number') {
+              if (signaled.size > currentCount) {
+                // Observed more than stored -> update upward
+                const newValue = { numberOfScripts: signaled.size, numberOfSuccess: ((current && current.numberOfSuccess) || 0) };
+                const setUrl = `${apiBase}/kv/set?key=${encodeURIComponent(pageUrl)}`;
+                try {
+                  await fetch(setUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ value: newValue })
+                  });
+                  console.log(`KV increased for ${pageUrl}:`, newValue);
+                } catch (e) {
+                  console.warn('Failed to update KV on hard timeout', e);
+                }
+              } else {
+                // Do not lower stored expected scripts — skip to avoid overwriting a correct higher value
+                console.log(`Skipping KV rewrite on hard timeout: stored ${currentCount} >= observed ${signaled.size}`);
+              }
+            } else {
+              // No stored count — write observed count so future loads will expect the observed number
+              const newValue = { numberOfScripts: signaled.size, numberOfSuccess: 0 };
+              const setUrl = `${apiBase}/kv/set?key=${encodeURIComponent(pageUrl)}`;
+              try {
+                await fetch(setUrl, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ value: newValue })
+                });
+                console.log(`KV initialized for ${pageUrl}:`, newValue);
+              } catch (e) {
+                console.warn('Failed to write KV on hard timeout', e);
+              }
+            }
+          } catch (e) {
+            console.warn('Hard timeout KV handling error', e);
+          }
+        }
+
+        // finish and let range-matching proceed
+        logAndFinish('hard timeout');
+      } catch (e) {
+        console.warn('Hard timeout handler error', e);
+        logAndFinish('hard timeout');
+      }
+    }, HARD_TIMEOUT);
+
     const logAndFinish = (reason: string) => {
       if (done) return;
       done = true;
@@ -294,6 +384,7 @@ export function useScriptExecutionTracker(
       setTotalTime(elapsed);
       setExecutedScripts(signaled.size);
       setSuccess(true);
+      try { clearTimeout(hardTimer); } catch { }
       cleanup();
     };
 

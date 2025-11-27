@@ -1,21 +1,24 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
 export function useLoggerSignals() {
   const [signals, setSignals] = useState<string[]>([]);
-  const nextIdRef = { current: 0 } as { current: number };
+  const nextIdRef = useRef(0);
 
   useEffect(() => {
+    type ProxyEventDetail = { url?: string; href?: string } & Record<string, unknown>;
+
     const onProxy = (ev: Event) => {
       try {
-        const detail = (ev as CustomEvent).detail;
+        const detail = (ev as CustomEvent).detail as unknown;
         let key: string | undefined;
         if (!detail) {
           key = `signal-${Date.now()}-${++nextIdRef.current}`;
         } else if (typeof detail === 'string') {
           key = detail;
         } else if (typeof detail === 'object' && detail !== null) {
-          if (typeof (detail as any).url === 'string' && (detail as any).url.length > 0) key = (detail as any).url;
-          else if (typeof (detail as any).href === 'string' && (detail as any).href.length > 0) key = (detail as any).href;
+          const d = detail as ProxyEventDetail;
+          if (typeof d.url === 'string' && d.url.length > 0) key = d.url;
+          else if (typeof d.href === 'string' && d.href.length > 0) key = d.href;
           else {
             // fallback: make a unique synthetic id to avoid repeated '[object Object]'
             key = `signal-${Date.now()}-${++nextIdRef.current}`;
