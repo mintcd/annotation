@@ -256,16 +256,22 @@ export function useScriptExecutionTracker(
       if (!pageUrl || !apiBase) return;
 
       try {
-        console.log(`${apiBase}/kv/get?key=${encodeURIComponent(pageUrl)}`);
-        const response = await fetch(`${apiBase}/kv/get?key=${encodeURIComponent(pageUrl)}`);
+        const url = `${apiBase}/kv/get?key=${encodeURIComponent(pageUrl)}`;
+        console.log(url);
+        const response = await fetch(url);
         if (response.ok) {
-          const data = await response.json();
-          if (data.value && typeof data.value === 'object') {
-            setKvData(data.value);
-            if ('numberOfScripts' in data.value) {
-              setNumberOfScripts(data.value.numberOfScripts);
-              console.log(`Expecting ${data.value.numberOfScripts} scripts for ${pageUrl}`);
+          const text = await response.text();
+          try {
+            const data = JSON.parse(text);
+            if (data && data.value && typeof data.value === 'object') {
+              setKvData(data.value);
+              if ('numberOfScripts' in data.value) {
+                setNumberOfScripts(data.value.numberOfScripts);
+                console.log(`Expecting ${data.value.numberOfScripts} scripts for ${pageUrl}`);
+              }
             }
+          } catch (parseErr) {
+            console.warn('KV response was not JSON, ignoring:', parseErr, text.substring(0, 200));
           }
         } else if (response.status === 404) {
           // Key not found is expected on first load - silently ignore
