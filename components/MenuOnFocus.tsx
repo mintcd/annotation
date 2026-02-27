@@ -62,7 +62,6 @@ export default function MenuOnFocus() {
   };
 
   function handleChangeStyle(e: React.MouseEvent<HTMLButtonElement>) {
-    console.log("Change style clicked");
     if (!focusedId) return;
     setShowColorPicker(true);
   }

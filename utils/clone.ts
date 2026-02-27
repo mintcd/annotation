@@ -37,12 +37,11 @@ function absoluteUrl(base: string, relative: string): string {
   }
 }
 
-function proxiedUrl(apiBase: string, targetUrl: string): string {
+function proxiedUrl(targetUrl: string): string {
   try {
     const u = new URL(targetUrl);
-    const base = apiBase.endsWith('/') ? apiBase.slice(0, -1) : apiBase;
     const proto = (u.protocol === 'http:' || u.protocol === 'https:') ? u.protocol.replace(':', '') + '/' : '';
-    return `${base}/proxy/${proto}${u.host}${u.pathname}${u.search}${u.hash}`;
+    return `/proxy/${proto}${u.host}${u.pathname}${u.search}${u.hash}`;
   } catch (e) {
     return targetUrl;
   }
@@ -80,13 +79,13 @@ function injectSignalSnippet(text: string, url: string, signalId?: string, scrip
   return `${text}\n${signalSnippet}`;
 }
 
-function rewriteCss(cssText: string, cssUrl: string, apiBase: string) {
+function rewriteCss(cssText: string, cssUrl: string) {
   const cssUrlObj = new URL(cssUrl);
 
   cssText = cssText.replace(/url\((['"]?)([^'"\)]+)\1\)/g, (match, quote, url) => {
     if (url.startsWith('http') || url.startsWith('data:') || url.startsWith('blob:')) return match;
     const resolvedUrl = new URL(url, cssUrl);
-    const rewrittenUrl = proxiedUrl(apiBase, resolvedUrl.href);
+    const rewrittenUrl = proxiedUrl(resolvedUrl.href);
     return `url(${quote}${rewrittenUrl}${quote})`;
   });
 
@@ -94,7 +93,7 @@ function rewriteCss(cssText: string, cssUrl: string, apiBase: string) {
     if (url.startsWith('http') || url.startsWith('data:') || url.startsWith('blob:')) return match;
     try {
       const resolvedUrl = new URL(url, cssUrl);
-      const rewrittenUrl = proxiedUrl(apiBase, resolvedUrl.href);
+      const rewrittenUrl = proxiedUrl(resolvedUrl.href);
       return `@import url(${quote}${rewrittenUrl}${quote})`;
     } catch {
       const proxyBase = `/proxy/${cssUrlObj.host}`;
@@ -107,7 +106,7 @@ function rewriteCss(cssText: string, cssUrl: string, apiBase: string) {
     if (url.startsWith('http') || url.startsWith('data:') || url.startsWith('blob:')) return match;
     try {
       const resolvedUrl = new URL(url, cssUrl);
-      const rewrittenUrl = proxiedUrl(apiBase, resolvedUrl.href);
+      const rewrittenUrl = proxiedUrl(resolvedUrl.href);
       return `@import url(${quote}${rewrittenUrl}${quote})`;
     } catch {
       const cssUrlObj = new URL(cssUrl);
@@ -120,7 +119,7 @@ function rewriteCss(cssText: string, cssUrl: string, apiBase: string) {
   return cssText;
 }
 
-export const getClonedPage = cache(async (apiBase: string, url: string): Promise<ClonedPage> => {
+export const getClonedPage = cache(async (url: string): Promise<ClonedPage> => {
   if (!url) throw new Error('Missing URL');
 
   const fetchHeaders: Record<string, string> = {
@@ -184,26 +183,26 @@ export const getClonedPage = cache(async (apiBase: string, url: string): Promise
 
     if (src) {
       const abs = absoluteUrl(clonedBase, src);
-      const proxied = proxiedUrl(apiBase, abs);
+      const proxied = proxiedUrl(abs);
       const scriptId = `${url}#script-${scripts.length}`;
       scripts.push({ id: scriptId, src: proxied, type, async, defer, location: 'head' });
     } else if (content) {
       let rewrittenContent = content;
       rewrittenContent = rewrittenContent.replace(/(?:[\"']?)src(?:[\"']?)\s*:\s*("|')(.*?)\1/g, (m: any, q: any, u: any) => {
         if (!u || u.startsWith('http') || u.startsWith('//') || isSkippable(u) || u.includes('/proxy/')) return m;
-        return `src: ${q}${proxiedUrl(apiBase, absoluteUrl(clonedBase, u))}${q}`;
+        return `src: ${q}${proxiedUrl(absoluteUrl(clonedBase, u))}${q}`;
       });
       rewrittenContent = rewrittenContent.replace(/\.src\s*=\s*("|')(.*?)\1/g, (m: any, q: any, u: any) => {
         if (!u || u.startsWith('http') || u.startsWith('//') || isSkippable(u) || u.includes('/proxy/')) return m;
-        return m.replace(u, proxiedUrl(apiBase, absoluteUrl(clonedBase, u)));
+        return m.replace(u, proxiedUrl(absoluteUrl(clonedBase, u)));
       });
       rewrittenContent = rewrittenContent.replace(/setAttribute\(\s*("|')src\1\s*,\s*("|')(.*?)\2\s*\)/g, (m: any, _q1: any, q2: any, u: any) => {
         if (!u || u.startsWith('http') || u.startsWith('//') || isSkippable(u) || u.includes('/proxy/')) return m;
-        return m.replace(u, proxiedUrl(apiBase, absoluteUrl(clonedBase, u)));
+        return m.replace(u, proxiedUrl(absoluteUrl(clonedBase, u)));
       });
       rewrittenContent = rewrittenContent.replace(/(\w+)\s*:\s*['"](\/[^'\"]*)['"]/g, (m: any, prop: any, u: any) => {
         if (prop === 'src' && !u.startsWith('http') && !u.startsWith('//') && !isSkippable(u) && !u.includes('/proxy/')) {
-          return `${prop}: '${proxiedUrl(apiBase, absoluteUrl(clonedBase, u))}'`;
+          return `${prop}: '${proxiedUrl(absoluteUrl(clonedBase, u))}'`;
         }
         return m;
       });
@@ -225,26 +224,26 @@ export const getClonedPage = cache(async (apiBase: string, url: string): Promise
 
     if (src) {
       const abs = absoluteUrl(clonedBase, src);
-      const proxied = proxiedUrl(apiBase, abs);
+      const proxied = proxiedUrl(abs);
       const scriptId = `${url}#script-${scripts.length}`;
       scripts.push({ id: scriptId, src: proxied, type, async, defer, location: 'body' });
     } else if (content) {
       let rewrittenContent = content;
       rewrittenContent = rewrittenContent.replace(/(?:[\"']?)src(?:[\"']?)\s*:\s*("|')(.*?)\1/g, (m: any, q: any, u: any) => {
         if (!u || u.startsWith('http') || u.startsWith('//') || isSkippable(u) || u.includes('/proxy/')) return m;
-        return `src: ${q}${proxiedUrl(apiBase, absoluteUrl(clonedBase, u))}${q}`;
+        return `src: ${q}${proxiedUrl(absoluteUrl(clonedBase, u))}${q}`;
       });
       rewrittenContent = rewrittenContent.replace(/\.src\s*=\s*("|')(.*?)\1/g, (m: any, q: any, u: any) => {
         if (!u || u.startsWith('http') || u.startsWith('//') || isSkippable(u) || u.includes('/proxy/')) return m;
-        return m.replace(u, proxiedUrl(apiBase, absoluteUrl(clonedBase, u)));
+        return m.replace(u, proxiedUrl(absoluteUrl(clonedBase, u)));
       });
       rewrittenContent = rewrittenContent.replace(/setAttribute\(\s*("|')src\1\s*,\s*("|')(.*?)\2\s*\)/g, (m: any, _q1: any, q2: any, u: any) => {
         if (!u || u.startsWith('http') || u.startsWith('//') || isSkippable(u) || u.includes('/proxy/')) return m;
-        return m.replace(u, proxiedUrl(apiBase, absoluteUrl(clonedBase, u)));
+        return m.replace(u, proxiedUrl(absoluteUrl(clonedBase, u)));
       });
       rewrittenContent = rewrittenContent.replace(/(\w+)\s*:\s*['"](\/[^'\"]*)['"]/g, (m: any, prop: any, u: any) => {
         if (prop === 'src' && !u.startsWith('http') && !u.startsWith('//') && !isSkippable(u) && !u.includes('/proxy/')) {
-          return `${prop}: '${proxiedUrl(apiBase, absoluteUrl(clonedBase, u))}'`;
+          return `${prop}: '${proxiedUrl(absoluteUrl(clonedBase, u))}'`;
         }
         return m;
       });
@@ -280,7 +279,7 @@ export const getClonedPage = cache(async (apiBase: string, url: string): Promise
       styleContent = `.cloned-content { ${styleContent} }`;
     }
     try {
-      styleContent = rewriteCss(styleContent, clonedBase, apiBase);
+      styleContent = rewriteCss(styleContent, clonedBase);
     } catch { }
     headStyles.push(`<style>${styleContent}</style>`);
   }).remove();
@@ -291,7 +290,7 @@ export const getClonedPage = cache(async (apiBase: string, url: string): Promise
       if (href) {
         try {
           const abs = absoluteUrl(clonedBase, href);
-          $(el).attr('href', proxiedUrl(apiBase, abs));
+          $(el).attr('href', proxiedUrl(abs));
         } catch { }
       }
     } catch { }
@@ -308,7 +307,7 @@ export const getClonedPage = cache(async (apiBase: string, url: string): Promise
   $('body style').each((_: any, el: any) => {
     try {
       let styleContent = $(el).html() || '';
-      try { styleContent = rewriteCss(styleContent, clonedBase, apiBase); } catch { }
+      try { styleContent = rewriteCss(styleContent, clonedBase); } catch { }
       try {
         const parsed = css.parse(styleContent);
         if (parsed.stylesheet) {

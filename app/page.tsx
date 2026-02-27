@@ -1,21 +1,15 @@
 import Annotator from "@/components/Annotator";
-import { loadAnnotationsForPage, loadAnnotations } from "@/utils/annotations";
-import { resolveApiBase } from '@/utils/api';
 import Dashboard from "@/components/Dashboard";
 import { getClonedPage } from '@/utils/clone';
-import { getServerOrigin } from "@/utils/api.server";
-
-export const runtime = 'edge';
+import { loadAnnotations, loadAnnotationsForPage } from "@/utils/annotations";
 
 export async function generateMetadata({ searchParams }: { searchParams: Promise<{ [key: string]: string | undefined }> }) {
   const { url } = await searchParams;
   if (!url) return { title: 'Dashboard' };
 
-  const serverOrigin = await getServerOrigin();
-  const apiBase = resolveApiBase(serverOrigin);
 
   try {
-    const { title } = await getClonedPage(apiBase, url);
+    const { title } = await getClonedPage(url);
     return { title: title || 'Annotation Page' };
   } catch (e) {
     return { title: 'Annotation - Error loading page' };
@@ -27,24 +21,22 @@ export default async function Page({
 }: {
   searchParams: Promise<{ [key: string]: string | undefined }>
 }) {
-  const serverOrigin = await getServerOrigin();
-  const apiBase = resolveApiBase(serverOrigin);
-  console.log('API Base URL:', apiBase);
+
   const { url } = await searchParams;
   if (!url) {
 
-    const annotationPages = await loadAnnotations(serverOrigin);
+    const annotationPages = await loadAnnotations();
     return <Dashboard annotationPages={annotationPages} />;
   }
 
-  const annotations = await loadAnnotationsForPage(apiBase, url);
-  const { title, favicon, body, scripts } = await getClonedPage(apiBase, url);
+  const annotations = await loadAnnotationsForPage(url);
+  const { title, favicon, body, scripts } = await getClonedPage(url);
 
   return (
     <Annotator
       annotations={annotations}
       title={title}
-      apiBase={apiBase}
+      apiBase={""}
       scripts={scripts}
       pageUrl={url}
     >

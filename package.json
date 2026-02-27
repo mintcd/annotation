@@ -1,17 +1,19 @@
 {
-  "name": "applications",
+  "name": "annotation",
   "type": "module",
-  "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack -p 5000",
-    "build": "next build",
-    "start": "next start",
+    "dev": "vite dev --port 5000",
+    "build": "vite build",
+    "deploy": "vinext deploy",
+    "dev:next": "next dev --turbopack -p 5000",
+    "build:next": "next build",
+    "start:next": "next start",
     "lint": "next lint",
     "test": "mocha"
   },
   "dependencies": {
-    "@vercel/blob": "^0.27.3",
+    "@vercel/blob": "^2.3.0",
     "cheerio": "^1.0.0",
     "css": "^3.0.0",
     "framer-motion": "^12.23.22",
@@ -19,20 +21,27 @@
     "next": "^16.1.6",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^5.4.296",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
     "react-icons": "^5.5.0",
     "styled-components": "^6.1.19"
   },
   "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.25.6",
     "@types/cors": "^2.8.17",
     "@types/css": "^0.0.38",
     "@types/node": "^20",
     "@types/pdfjs-dist": "^2.10.377",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-rsc": "^0.5.21",
+    "baseline-browser-mapping": "^2.10.0",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
-    "typescript": "^5"
+    "react-server-dom-webpack": "^19.2.4",
+    "typescript": "^5",
+    "vinext": "^0.0.14",
+    "vite": "^7.3.1",
+    "wrangler": "^4.69.0"
   }
 }

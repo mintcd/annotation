@@ -3,7 +3,7 @@
 import { createContext, useContext, ReactNode } from "react";
 import { useCallback, useState, useMemo, useEffect, useRef } from "react";
 import { removeHighlights } from "../utils/dom";
-import { saveAnnotationsForPage } from "../utils/annotations";
+import { createAnnotation, updateAnnotation as updateAnnotationAPI, deleteAnnotation as deleteAnnotationAPI, createOrUpdatePage, getPage } from "../utils/database";
 
 type AnnotationContextProps = {
   children: ReactNode;
@@ -21,7 +21,7 @@ type AnnotationContextType = {
   title?: string;
   currentHighlightColor: string;
   setCurrentHighlightColor: React.Dispatch<React.SetStateAction<string>>;
-  addAnnotation: (text: string, html: string, color: string) => void;
+  addAnnotation: (text: string, html: string, color: string) => Promise<{ tempId: string; promise: Promise<string> }>;
   deleteAnnotation: (id: string) => void;
   updateAnnotation: (params: { id: string; comment?: string; color?: string; text?: string; html?: string }) => void;
   syncStatus: 'synced' | 'syncing' | 'to-sync';
@@ -53,32 +53,80 @@ export function AnnotationContext({
 }: AnnotationContextProps) {
   const [annotations, setAnnotations] = useState<AnnotationItem[]>(initialAnnotations);
   const [currentHighlightColor, setCurrentHighlightColor] = useState<string>("#87ceeb");
-  const [lastSavedAnnotations, setLastSavedAnnotations] = useState<string>('');
-  const [isAutoSaving, setIsAutoSaving] = useState(false);
+  const [pendingOperations, setPendingOperations] = useState<Array<{ type: 'create' | 'update' | 'delete', annotation: AnnotationItem }>>([]);
   const [lastAutoSaveStatus, setLastAutoSaveStatus] = useState<{ success: boolean; message: string } | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const addAnnotation = useCallback((text: string, html: string, color: string) => {
-    const id = Date.now().toString();
+  const addAnnotation = useCallback(async (text: string, html: string, color: string): Promise<{ tempId: string; promise: Promise<string> }> => {
+    const tempId = `temp-${Date.now()}`;
     const now = Date.now();
-    const newAnnotation: AnnotationItem = {
-      id,
+    const tempAnnotation: AnnotationItem = {
+      id: tempId,
       text,
       color,
       created: now,
       lastModified: now,
       html,
     };
-    setAnnotations(prev => [...prev, newAnnotation]);
-  }, []);
+    // Add temporary annotation to show immediately in UI
+    setAnnotations(prev => [...prev, tempAnnotation]);
 
-  const deleteAnnotation = useCallback((id: string) => {
+    // Return temp ID immediately and a promise for the final ID
+    const promise = (async () => {
+      try {
+        // Ensure page exists first
+        let page = await getPage(pageUrl);
+        if (!page) {
+          page = await createOrUpdatePage(pageUrl, title || "Annotated Page", 0);
+        }
+
+        // Create annotation and get server-generated ID, including color
+        const serverAnnotation = await createAnnotation(pageUrl, text, html, color);
+
+        // Replace temp annotation with server annotation (with proper ID)
+        setAnnotations(prev => prev.map(ann =>
+          ann.id === tempId ? {
+            ...ann,
+            id: serverAnnotation.id,
+            color: serverAnnotation.color, // Use color from server
+            created: new Date(serverAnnotation.created_at).getTime(),
+            lastModified: new Date(serverAnnotation.updated_at).getTime(),
+          } : ann
+        ));
+
+        setLastAutoSaveStatus({ success: true, message: "Annotation created" });
+        return serverAnnotation.id;
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        setLastAutoSaveStatus({ success: false, message: errorMessage });
+        console.error("Failed to create annotation:", error);
+        // Remove temp annotation on failure
+        setAnnotations(prev => prev.filter(ann => ann.id !== tempId));
+        throw error;
+      }
+    })();
+
+    return { tempId, promise };
+  }, [pageUrl, title]);
+
+  const deleteAnnotation = useCallback(async (id: string) => {
     if (!contentRef.current) return;
     removeHighlights(contentRef.current, id);
     setAnnotations(prev => prev.filter((a) => a.id !== id));
+
+    // Immediately delete from API
+    try {
+      await deleteAnnotationAPI(id);
+      setLastAutoSaveStatus({ success: true, message: "Annotation deleted" });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      setLastAutoSaveStatus({ success: false, message: errorMessage });
+      console.error("Failed to delete annotation:", error);
+    }
   }, [contentRef]);
 
-  const updateAnnotation = useCallback((params: { id: string; comment?: string; color?: string; text?: string; html?: string }) => {
+  const updateAnnotation = useCallback(async (params: { id: string; comment?: string; color?: string; text?: string; html?: string }) => {
     const { id, comment, color, text, html } = params;
 
     // If color is updated, also update DOM highlights immediately for UX.
@@ -91,8 +139,11 @@ export function AnnotationContext({
       });
     }
 
+    let currentAnnotation: AnnotationItem | undefined;
+
     setAnnotations(prev => prev.map(ann => {
       if (ann.id !== id) return ann;
+      currentAnnotation = ann; // Capture current annotation before update
       const updated: AnnotationItem = { ...ann, lastModified: Date.now() } as AnnotationItem;
       if (comment !== undefined) updated.comment = comment.trim() || undefined;
       if (color !== undefined) updated.color = color;
@@ -100,90 +151,30 @@ export function AnnotationContext({
       if (html !== undefined) updated.html = html;
       return updated;
     }));
-  }, [contentRef]);
 
-  // Sync logic
-  const saveAnnotations = useCallback(async (): Promise<{ success: boolean; message: string }> => {
+    // Immediately update in API
     try {
-      const result = await saveAnnotationsForPage(annotations, pageUrl, title || "Annotated Page");
-      return result;
+      if (currentAnnotation) {
+        const updatedText = text !== undefined ? text : undefined;
+        const updatedHtml = html !== undefined ? html : undefined;
+        const updatedColor = color !== undefined ? color : undefined;
+        const updatedComment = comment !== undefined ? (comment.trim() || null) : undefined;
+        await updateAnnotationAPI(id, updatedText, updatedHtml, updatedColor, updatedComment);
+        setLastAutoSaveStatus({ success: true, message: "Annotation updated" });
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      return { success: false, message: errorMessage };
+      setLastAutoSaveStatus({ success: false, message: errorMessage });
+      console.error("Failed to update annotation:", error);
     }
-  }, [annotations, pageUrl, title]);
+  }, [contentRef]);
 
-  // Compute current annotations hash
-  const currentHash = useMemo(() => {
-    return JSON.stringify(
-      annotations
-        .map((a) => ({
-          id: a.id,
-          text: a.text,
-          comment: a.comment ?? null,
-          color: a.color ?? null,
-        }))
-        .sort((a, b) => a.id.localeCompare(b.id))
-    );
-  }, [annotations]);
-
-  // Check if there are unsaved changes
-  const hasUnsavedChanges = useMemo(() => {
-    return lastSavedAnnotations !== '' && currentHash !== lastSavedAnnotations;
-  }, [currentHash, lastSavedAnnotations]);
-
-  // Mark current state as saved
-  const markAsSaved = useCallback(() => {
-    setLastSavedAnnotations(currentHash);
-  }, [currentHash]);
-
-  // Initialize on first mount
-  const hasInitialized = useRef(false);
-  useEffect(() => {
-    if (!hasInitialized.current) {
-      setLastSavedAnnotations(currentHash);
-      hasInitialized.current = true;
-    }
-  }, [currentHash]);
-
-  // Auto-save effect
-  useEffect(() => {
-    if (!hasUnsavedChanges) return;
-
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-    }
-
-    timeoutRef.current = setTimeout(async () => {
-      setIsAutoSaving(true);
-      try {
-        const result = await saveAnnotations();
-        setLastAutoSaveStatus(result);
-        if (result.success) {
-          markAsSaved();
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        setLastAutoSaveStatus({ success: false, message: errorMessage });
-      } finally {
-        setIsAutoSaving(false);
-      }
-    }, 2000); // autoSaveDelay hardcoded to 2000ms for now
-
-    return () => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-    };
-  }, [hasUnsavedChanges, saveAnnotations, markAsSaved]);
-
-  // Compute syncStatus
-  const syncStatus: 'synced' | 'syncing' | 'to-sync' = useMemo(() => {
-    if (isAutoSaving) return 'syncing';
-    if (hasUnsavedChanges) return 'to-sync';
+  // Compute sync status based on pending operations
+  const syncStatus = useMemo<'synced' | 'syncing' | 'to-sync'>(() => {
+    if (isSyncing) return 'syncing';
+    if (pendingOperations.length > 0) return 'to-sync';
     return 'synced';
-  }, [isAutoSaving, hasUnsavedChanges]);
-
+  }, [isSyncing, pendingOperations]);
 
   const value = {
     contentRef,

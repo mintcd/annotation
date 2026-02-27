@@ -1,0 +1,33 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "annotation",
+  "compatibility_date": "2026-02-27",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "main": "./worker/index.ts",
+  "assets": {
+    "directory": "./dist/client",
+    "not_found_handling": "none",
+    "binding": "ASSETS"
+  },
+  "images": {
+    "binding": "IMAGES"
+  },
+  "r2_buckets": [
+    {
+      "binding": "ANNOTATIONS_BUCKET",
+      "bucket_name": "annotations",
+      "preview_bucket_name": "annotations",
+      "remote": true
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "annotations",
+      "database_id": "d0b49103-0e2d-472a-8c52-b323f5819d6e",
+      "remote": true
+    }
+  ]
+}

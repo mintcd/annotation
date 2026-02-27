@@ -5,8 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Folder, ChevronDown, ChevronRight } from '../public/icons';
 import Link from "next/link";
 import { useClient, useMobile } from "../hooks";
-import { deleteBlob } from '../utils/database';
-import { loadAnnotationsForPage, saveAnnotationsForPage } from '../utils/annotations';
+import { deletePage as deletePageAPI, deleteAnnotation as deleteAnnotationAPI, updateAnnotation as updateAnnotationAPI } from '../utils/database';
 import PromptBox from './PromptBox';
 import AnnotationList from './AnnotationList';
 import styles from '../styles/Dashboard.styles';
@@ -158,23 +157,12 @@ export default function Dashboard({ annotationPages }: DashboardProps) {
     setDeletingPages(prev => new Set(prev).add(pageUrl));
 
     try {
-      const result = await deleteBlob(filename, serverOrigin);
-      if (result.success) {
-        // Page successfully deleted from storage
-        console.log(`Successfully deleted page: ${pageUrl}`);
-      } else {
-        // Restore the page in local state since deletion failed
-        setLocalAnnotationPages(prev => [...prev, pageToDelete].sort((a, b) =>
-          new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
-        ));
-        alert(`Failed to delete page: ${result.error}`);
-      }
+      await deletePageAPI(pageUrl);
     } catch (error) {
       // Restore the page in local state since deletion failed
       setLocalAnnotationPages(prev => [...prev, pageToDelete].sort((a, b) =>
         new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
       ));
-      alert(`Error deleting page: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setDeletingPages(prev => {
         const newSet = new Set(prev);
@@ -214,30 +202,8 @@ export default function Dashboard({ annotationPages }: DashboardProps) {
     ));
 
     try {
-      // Load current annotations for the page
-      const currentAnnotations = await loadAnnotationsForPage(serverOrigin, pageUrl);
-
-      // Remove the annotation from the array
-      const updatedAnnotations = currentAnnotations.filter(ann => ann.id !== annotationId);
-
-      // Save the updated annotations
-      const result = await saveAnnotationsForPage(updatedAnnotations, pageUrl);
-
-      if (result.success) {
-        console.log(`Successfully deleted annotation: ${annotationId}`);
-      } else {
-        // Restore the annotation in local state since deletion failed
-        setLocalAnnotationPages(prev => prev.map(page =>
-          page.url === pageUrl
-            ? {
-              ...page,
-              annotations: [...page.annotations, annotationToDelete].sort((a, b) => (a.id > b.id ? 1 : -1)),
-              count: page.annotations.length + 1
-            }
-            : page
-        ));
-        alert(`Failed to delete annotation: ${result.message}`);
-      }
+      // Delete the annotation using the API
+      await deleteAnnotationAPI(annotationId);
     } catch (error) {
       // Restore the annotation in local state since deletion failed
       setLocalAnnotationPages(prev => prev.map(page =>
@@ -287,35 +253,15 @@ export default function Dashboard({ annotationPages }: DashboardProps) {
     setEditingComment(null);
 
     try {
-      // Load current annotations for the page
-      const currentAnnotations = await loadAnnotationsForPage(serverOrigin, editingComment.pageUrl);
-
-      // Find and update the specific annotation
-      const updatedAnnotations = currentAnnotations.map(ann =>
-        ann.id === editingComment.annotationId
-          ? { ...ann, comment: editingComment.comment.trim() || undefined, lastModified: Date.now() }
-          : ann
-      );
-
-      // Save the updated annotations
-      const result = await saveAnnotationsForPage(updatedAnnotations, editingComment.pageUrl);
-
-      if (!result.success) {
-        // Restore the old comment in local state since save failed
-        setLocalAnnotationPages(prev => prev.map(page =>
-          page.url === editingComment.pageUrl
-            ? {
-              ...page,
-              annotations: page.annotations.map(ann =>
-                ann.id === editingComment.annotationId
-                  ? { ...ann, comment: oldComment }
-                  : ann
-              )
-            }
-            : page
-        ));
-        alert(`Failed to save comment: ${result.message}`);
+      // Find the annotation to get its text
+      const annotation = pageToUpdate?.annotations.find(ann => ann.id === editingComment.annotationId);
+      if (!annotation) {
+        alert('Annotation not found');
+        return;
       }
+
+      // Update the annotation using the API
+      await updateAnnotationAPI(editingComment.annotationId, annotation.text, annotation.html);
     } catch (error) {
       // Restore the old comment in local state since save failed
       setLocalAnnotationPages(prev => prev.map(page =>

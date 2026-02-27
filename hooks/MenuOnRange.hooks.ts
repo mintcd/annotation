@@ -107,13 +107,12 @@ export function useSelection(menuRef: React.RefObject<HTMLElement | null>) {
   }, [isMobile, handlePointerUp, handlePointerDown, debouncedFinalize, handleSelectionChanging]);
 
 
-  const highlight = () => {
+  const highlight = async () => {
     if (!range) return;
 
     const text = range.toString();
     const { html } = cleanedHtml(rangeToHtml(range));
-    addAnnotation(text, html, currentHighlightColor);
-
+    
     const container = contentRef.current;
     const startEl =
       range.startContainer.nodeType === Node.ELEMENT_NODE
@@ -131,8 +130,27 @@ export function useSelection(menuRef: React.RefObject<HTMLElement | null>) {
     const sel = window.getSelection();
     if (sel) sel.removeAllRanges();
 
-    highlightRange(range, currentHighlightColor);
+    // Create annotation and get temp ID immediately
+    const { tempId, promise } = await addAnnotation(text, html, currentHighlightColor);
+    
+    // Highlight with temp ID immediately
+    highlightRange(range, currentHighlightColor, tempId);
     setRange(null);
+
+    // Update highlight IDs when server responds with real ID
+    promise.then(serverId => {
+      if (serverId !== tempId) {
+        // Update all spans with temp ID to use server ID
+        const spans = container.querySelectorAll<HTMLSpanElement>(
+          `span.highlighted-text[data-highlight-id="${tempId}"]`
+        );
+        spans.forEach(span => {
+          span.setAttribute('data-highlight-id', serverId);
+        });
+      }
+    }).catch(error => {
+      console.error('Failed to update highlight ID:', error);
+    });
   };
 
   return { range, highlight };

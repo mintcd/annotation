@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import { matchedRange, highlightRange, rangeToHtml, findBestTextNode } from '../utils/dom';
+import { getPage, createOrUpdatePage } from '../utils/database';
 
 type RangeResult = {
   id: string;
@@ -39,6 +40,10 @@ export function useRangeMatching(
   const [isMatching, setIsMatching] = useState(false);
   const timersRef = useRef<number[]>([]);
   const pendingMatchesRef = useRef(0);
+  // Track which annotations have been successfully matched to avoid re-matching
+  const matchedAnnotationIdsRef = useRef<Set<string>>(new Set());
+  // Track the last ready state and annotation set to prevent duplicate runs
+  const lastProcessedRef = useRef<{ ready: boolean; annotationIds: string[] }>({ ready: false, annotationIds: [] });
 
   function updateRangeResult(id: string, patch: Partial<RangeResult>) {
     setRangeResults(prev => {
@@ -58,18 +63,68 @@ export function useRangeMatching(
     if (!ready) return;
     const container = contentRef.current;
     if (!container) return;
+    if (!annotations || annotations.length === 0) return;
+
+    // Check if we should skip this matching run
+    const currentAnnotationIds = annotations.map(a => a.id).sort();
+    const lastAnnotationIds = lastProcessedRef.current.annotationIds;
+    const sameAnnotations = currentAnnotationIds.length === lastAnnotationIds.length && 
+      currentAnnotationIds.every((id, idx) => id === lastAnnotationIds[idx]);
+
+    // Skip if we've already processed these exact annotations when ready was true
+    if (lastProcessedRef.current.ready && sameAnnotations) {
+      return;
+    }
+
+    // Update tracking
+    lastProcessedRef.current = { ready, annotationIds: currentAnnotationIds };
 
     // clear previous timers when rerunning
     timersRef.current.forEach(t => clearTimeout(t));
     timersRef.current = [];
-    // clear previously rendered HTML for annotations when rerunning
-    setRenderedHtmlMap({});
-    // Clear previous results
-    setRangeResults([]);
+    
+    // Only clear data for annotations that are no longer in the list
+    const currentIds = new Set(currentAnnotationIds);
+    setRenderedHtmlMap(prev => {
+      const filtered: Record<string, string> = {};
+      for (const id of Object.keys(prev)) {
+        if (currentIds.has(id)) {
+          filtered[id] = prev[id];
+        }
+      }
+      return filtered;
+    });
+    
+    // Only keep results for current annotations
+    setRangeResults(prev => {
+      const filtered = prev.filter(r => currentIds.has(r.id));
+      
+      // For annotations that are already matched but don't have results yet, add them
+      const existingResultIds = new Set(filtered.map(r => r.id));
+      const alreadyMatchedWithoutResults = annotations
+        .filter(a => matchedAnnotationIdsRef.current.has(a.id) && !existingResultIds.has(a.id))
+        .map(a => ({
+          id: a.id,
+          snippet: a.text.substring(0, 120),
+          success: true,
+          message: 'Already matched'
+        }));
+      
+      return [...filtered, ...alreadyMatchedWithoutResults];
+    });
+
+    // Only match annotations that haven't been successfully matched yet
+    const annotationsToMatch = annotations.filter(a => !matchedAnnotationIdsRef.current.has(a.id));
+    
+    if (annotationsToMatch.length === 0) {
+      // All annotations already matched
+      setIsMatching(false);
+      return;
+    }
 
     // Set isMatching to true when starting
     setIsMatching(true);
-    pendingMatchesRef.current = annotations?.length || 0;
+    pendingMatchesRef.current = annotationsToMatch.length;
 
     // Wait for DOM to stabilize after scripts execute
     const waitForDOMStability = (callback: () => void, maxWaitTime: number = 3000) => {
@@ -136,12 +191,14 @@ export function useRangeMatching(
       timersRef.current.push(initialStableTimer);
     };
 
-    annotations?.forEach(ann => {
+    annotationsToMatch.forEach(ann => {
       const tryRestore = () => {
         const range = matchedRange(container, ann.text);
         const html = rangeToHtml(range);
         if (range) {
           highlightRange(range, ann.color || '#ffff00', ann.id);
+          // Mark as successfully matched
+          matchedAnnotationIdsRef.current.add(ann.id);
           try {
             setRenderedHtmlMap(prev => ({ ...prev, [ann.id]: html }));
             updateRangeResult(ann.id, { success: true, snippet: ann.text.substring(0, 120), message: 'Restored' });
@@ -176,6 +233,14 @@ export function useRangeMatching(
     };
   }, [ready, annotations, contentRef]);
 
+  // Reset tracking when pageUrl changes (new page)
+  useEffect(() => {
+    matchedAnnotationIdsRef.current.clear();
+    lastProcessedRef.current = { ready: false, annotationIds: [] };
+    setRangeResults([]);
+    setRenderedHtmlMap({});
+  }, [pageUrl]);
+
   const allMatched = (annotations || []).every(a => {
     const r = rangeResults.find(rr => rr.id === a.id);
     return !!(r && r.success === true);
@@ -195,16 +260,14 @@ export function useRangeMatching(
         if (kvData && typeof kvData === 'object') {
           currentData = { ...kvData };
         } else {
-          // fetch latest from KV to merge safely
+          // fetch latest from pages API to merge safely
           try {
-            const getUrl = `${apiBase}/kv/get?key=${encodeURIComponent(pageUrl)}`;
-            const res = await fetch(getUrl).catch(() => null);
-            if (res && res.ok) {
-              const txt = await res.text();
-              try {
-                const parsed = JSON.parse(txt);
-                if (parsed && parsed.value && typeof parsed.value === 'object') currentData = parsed.value;
-              } catch { /* ignore non-JSON */ }
+            const page = await getPage(pageUrl);
+            if (page) {
+              currentData = {
+                numberOfScripts: page.number_of_scripts,
+                numberOfSuccess: page.number_of_annotations
+              };
             }
           } catch (e) {
             // ignore fetch failures; we'll create a new object below
@@ -220,17 +283,20 @@ export function useRangeMatching(
           }
         }
 
-        // Increment numberOfSuccess
+        // Increment numberOfSuccess (number of times annotations were successfully matched)
         currentData.numberOfSuccess = (currentData.numberOfSuccess || 0) + 1;
 
-        // Write back to KV
-        await fetch(`${apiBase}/kv/set?key=${encodeURIComponent(pageUrl)}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ value: currentData })
-        });
+        // Update page in database
+        const page = await getPage(pageUrl);
+        if (page) {
+          await createOrUpdatePage(
+            pageUrl,
+            page.title,
+            currentData.numberOfScripts || 0
+          );
+        }
 
-        console.log(`Updated KV for ${pageUrl}:`, currentData);
+        console.log(`Updated page for ${pageUrl}:`, currentData);
         hasUpdatedKVRef.current = true;
       } catch (e) {
         console.error('Failed to update KV:', e);
@@ -263,6 +329,9 @@ export function useScriptExecutionTracker(
   const [executedScripts, setExecutedScripts] = useState(0);
   const [kvData, setKvData] = useState<{ numberOfScripts?: number; numberOfSuccess?: number } | null>(null);
 
+  // Use a ref to track expected scripts to avoid effect re-running when it's set
+  const numberOfScriptsRef = useRef<number | undefined>(undefined);
+
   useEffect(() => {
     let done = false;
     const startTime = Date.now();
@@ -271,38 +340,33 @@ export function useScriptExecutionTracker(
     let lastSeenCount = 0;
     let lastChangeTime = Date.now();
 
-    // Fetch numberOfScripts from KV API if available
-    const fetchKVData = async () => {
+    // Fetch numberOfScripts from pages API if available
+    const fetchPageData = async () => {
       if (!pageUrl || !apiBase) return;
 
       try {
-        const url = `${apiBase}/kv/get?key=${encodeURIComponent(pageUrl)}`;
-        console.log(url);
-        const response = await fetch(url);
-        if (response.ok) {
-          const text = await response.text();
-          try {
-            const data = JSON.parse(text);
-            if (data && data.value && typeof data.value === 'object') {
-              setKvData(data.value);
-              if ('numberOfScripts' in data.value) {
-                setNumberOfScripts(data.value.numberOfScripts);
-                console.log(`Expecting ${data.value.numberOfScripts} scripts for ${pageUrl}`);
-              }
-            }
-          } catch (parseErr) {
-            console.warn('KV response was not JSON, ignoring:', parseErr, text.substring(0, 200));
+        const page = await getPage(pageUrl);
+        if (page) {
+          const data = {
+            numberOfScripts: page.number_of_scripts,
+            numberOfSuccess: page.number_of_annotations
+          };
+          setKvData(data);
+          if (page.number_of_scripts > 0) {
+            numberOfScriptsRef.current = page.number_of_scripts;
+            setNumberOfScripts(page.number_of_scripts);
+            console.log(`Expecting ${page.number_of_scripts} scripts for ${pageUrl}`);
           }
-        } else if (response.status === 404) {
-          // Key not found is expected on first load - silently ignore
-          console.log('KV data not found (first load)');
+        } else {
+          // Page not found is expected on first load - silently ignore
+          console.log('Page data not found (first load)');
         }
       } catch (e) {
         console.log(e);
       }
     };
 
-    fetchKVData();
+    fetchPageData();
 
     // Hard timeout: after 10s, give up waiting for more signals and hand off to range-matching
     const HARD_TIMEOUT = 10000;
@@ -311,58 +375,48 @@ export function useScriptExecutionTracker(
         if (done) return;
         console.log(`Hard timeout after ${HARD_TIMEOUT}ms waiting for script signals`);
 
-        // If we expected more scripts than we've seen, rewrite KV to the observed smaller value
+        // If we expected more scripts than we've seen, update page with the observed value
         if (pageUrl && apiBase) {
           try {
-            // Fetch current KV (may be non-JSON; tolerate that)
-            const getUrl = `${apiBase}/kv/get?key=${encodeURIComponent(pageUrl)}`;
-            const getRes = await fetch(getUrl).catch(() => null);
+            // Fetch current page data
+            const page = await getPage(pageUrl);
             let current: { numberOfScripts?: number; numberOfSuccess?: number } | null = null;
-            if (getRes && getRes.ok) {
-              try {
-                const txt = await getRes.text();
-                const parsed = JSON.parse(txt);
-                current = parsed && parsed.value && typeof parsed.value === 'object' ? parsed.value : null;
-              } catch { current = null; }
+            if (page) {
+              current = {
+                numberOfScripts: page.number_of_scripts,
+                numberOfSuccess: page.number_of_annotations
+              };
             }
 
             const currentCount = current && typeof current.numberOfScripts === 'number' ? current.numberOfScripts : undefined;
             if (typeof currentCount === 'number') {
               if (signaled.size > currentCount) {
                 // Observed more than stored -> update upward
-                const newValue = { numberOfScripts: signaled.size, numberOfSuccess: ((current && current.numberOfSuccess) || 0) };
-                const setUrl = `${apiBase}/kv/set?key=${encodeURIComponent(pageUrl)}`;
-                try {
-                  await fetch(setUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ value: newValue })
-                  });
-                  console.log(`KV increased for ${pageUrl}:`, newValue);
-                } catch (e) {
-                  console.warn('Failed to update KV on hard timeout', e);
+                if (page) {
+                  await createOrUpdatePage(
+                    pageUrl,
+                    page.title,
+                    signaled.size
+                  );
+                  console.log(`Page updated for ${pageUrl}: ${signaled.size} scripts`);
                 }
               } else {
                 // Do not lower stored expected scripts — skip to avoid overwriting a correct higher value
-                console.log(`Skipping KV rewrite on hard timeout: stored ${currentCount} >= observed ${signaled.size}`);
+                console.log(`Skipping page update on hard timeout: stored ${currentCount} >= observed ${signaled.size}`);
               }
             } else {
-              // No stored count — write observed count so future loads will expect the observed number
-              const newValue = { numberOfScripts: signaled.size, numberOfSuccess: 0 };
-              const setUrl = `${apiBase}/kv/set?key=${encodeURIComponent(pageUrl)}`;
-              try {
-                await fetch(setUrl, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ value: newValue })
-                });
-                console.log(`KV initialized for ${pageUrl}:`, newValue);
-              } catch (e) {
-                console.warn('Failed to write KV on hard timeout', e);
+              // No stored count — create page with observed count so future loads will expect the observed number
+              if (page) {
+                await createOrUpdatePage(
+                  pageUrl,
+                  page.title,
+                  signaled.size
+                );
+                console.log(`Page initialized for ${pageUrl}: ${signaled.size} scripts`);
               }
             }
           } catch (e) {
-            console.warn('Hard timeout KV handling error', e);
+            console.warn('Hard timeout page handling error', e);
           }
         }
 
@@ -438,9 +492,9 @@ export function useScriptExecutionTracker(
           }
 
           // If we have numberOfScripts, check if we've reached it
-          if (numberOfScripts !== undefined) {
-            if (!done && signaled.size >= numberOfScripts) {
-              console.log(`Reached expected number of scripts: ${numberOfScripts}`);
+          if (numberOfScriptsRef.current !== undefined) {
+            if (!done && signaled.size >= numberOfScriptsRef.current) {
+              console.log(`Reached expected number of scripts: ${numberOfScriptsRef.current}`);
               logAndFinish('expected scripts reached');
               return;
             }
@@ -470,7 +524,7 @@ export function useScriptExecutionTracker(
     return () => {
       cleanup();
     };
-  }, [pageUrl, apiBase, numberOfScripts]);
+  }, [pageUrl, apiBase]); // Removed numberOfScripts from dependencies - it's managed via ref to prevent re-runs
 
   return { totalTime, error, success, numberOfScripts, executedScripts, kvData };
 }

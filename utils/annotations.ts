@@ -1,5 +1,4 @@
-import { getAnnotationFilename } from './string';
-import { getBlob, uploadBlob, listBlobs } from './database';
+import { listPages, getAnnotationsForPage, Page, Annotation } from './database';
 
 
 export type SortOption = 'created-asc' | 'created-desc' | 'modified-asc' | 'modified-desc' | 'dom-order';
@@ -40,16 +39,7 @@ export const sortOptions = [
   { value: 'modified-asc' as SortOption, label: 'Least Recently Modified' },
 ];
 
-
-type BlobFile = {
-  url: string;
-  pathname: string;
-  size: number;
-  uploadedAt: string;
-}
-
-
-type AnnotationPage = {
+export type AnnotationPage = {
   url: string;
   filename: string;
   timestamp: string;
@@ -60,58 +50,42 @@ type AnnotationPage = {
   uploadedAt: string;
 }
 
-export async function loadAnnotations(serverOrigin?: string): Promise<AnnotationPage[]> {
+// Convert database Annotation to AnnotationItem
+function convertToAnnotationItem(annotation: Annotation): AnnotationItem {
+  return {
+    id: annotation.id,
+    text: annotation.text,
+    html: annotation.html || undefined, // Include the html field (actual HTML content from API)
+    color: annotation.color || '#87ceeb', // Use color from database or default
+    comment: annotation.comment || undefined, // Include comment if present
+    created: new Date(annotation.created_at).getTime(),
+    lastModified: new Date(annotation.updated_at).getTime(),
+  };
+}
+
+export async function loadAnnotations(): Promise<AnnotationPage[]> {
   try {
-    const blobFiles: BlobFile[] = await listBlobs('annotations', '.json', serverOrigin);
+    const pages: Page[] = await listPages();
 
     const annotationPages: AnnotationPage[] = [];
 
-    for (const file of blobFiles) {
+    for (const page of pages) {
       try {
-        let jsonString: string | null = null;
-        try {
-          jsonString = await getBlob(file.pathname, serverOrigin);
-        } catch (e) {
-          try {
-            const r = await fetch(file.url, { cache: 'no-store' });
-            if (!r.ok) {
-              console.error(`Failed to fetch ${file.pathname}: ${r.status}`);
-              continue;
-            }
-            jsonString = await r.text();
-          } catch (ee) {
-            console.error(`Failed to fetch ${file.pathname}:`, ee);
-            continue;
-          }
-        }
-        if (!jsonString) {
-          console.error(`No content for ${file.pathname}`);
-          continue;
-        }
-
-        const data = JSON.parse(jsonString);
-        const metadata = data.metadata || {};
-        const annotations = data.annotations || data;
-        const title = data.title || undefined;
-
-        if (!Array.isArray(annotations)) {
-          console.error(`Invalid data for ${file.pathname}: annotations should be an array`);
-          continue;
-        }
+        const annotations = await getAnnotationsForPage(page.url);
 
         annotationPages.push({
-          url: metadata.url || '',
-          filename: file.pathname,
-          timestamp: metadata.timestamp || '',
-          title,
-          count: metadata.count || annotations.length,
-          annotations,
-          blobUrl: file.url,
-          uploadedAt: file.uploadedAt
+          url: page.url,
+          filename: `${page.id}.json`, // Not really used anymore but kept for compatibility
+          timestamp: page.created_at,
+          title: page.title,
+          count: page.number_of_annotations,
+          annotations: annotations.map(convertToAnnotationItem),
+          blobUrl: '', // Not used anymore
+          uploadedAt: page.updated_at
         });
       } catch (error) {
-        console.error(`Error processing ${file.pathname}:`, error);
-        // Continue with other files
+        console.error(`Error processing page ${page.url}:`, error);
+        // Continue with other pages
       }
     }
 
@@ -129,31 +103,22 @@ export async function loadAnnotations(serverOrigin?: string): Promise<Annotation
 }
 
 
-export async function loadAnnotationsForPage(serverOrigin: string, pageUrl: string): Promise<AnnotationItem[]> {
+export async function loadAnnotationsForPage(pageUrl: string): Promise<AnnotationItem[]> {
   try {
-    const filename = getAnnotationFilename(pageUrl);
-    const jsonString = await getBlob(filename, serverOrigin);
-    if (jsonString === null) {
+    const annotations = await getAnnotationsForPage(pageUrl);
+
+    if (!annotations || annotations.length === 0) {
       // No annotations exist yet - this is expected on first visit
       return [];
     }
-
-    const data = JSON.parse(jsonString);
-    const annotations = data.annotations || data;
-
-    if (!Array.isArray(annotations)) {
-      console.error(`Invalid data for ${pageUrl}: annotations should be an array`);
-      return [];
-    }
-
-    console.log(`Loaded ${annotations.length} annotations from ${filename}`);
-
-    return annotations;
+    console.log(annotations)
+    console.log(`Loaded ${annotations.length} annotations for ${pageUrl}`);
+    return annotations.map(convertToAnnotationItem);
   } catch (error) {
-    // Check if it's a 404/500 (blob doesn't exist) vs a real error
+    // Check if it's a 404 (no annotations yet) vs a real error
     const errorMessage = error instanceof Error ? error.message : String(error);
-    if (errorMessage.includes('404') || errorMessage.includes('500')) {
-      // Blob doesn't exist yet - silently return empty array
+    if (errorMessage.includes('404')) {
+      // No annotations exist yet - silently return empty array
       return [];
     }
     // Log other errors that might indicate real problems
@@ -162,41 +127,8 @@ export async function loadAnnotationsForPage(serverOrigin: string, pageUrl: stri
   }
 }
 
+// Note: saveAnnotationsForPage is now handled differently
+// The client should directly call createAnnotation/updateAnnotation/deleteAnnotation
+// from database.ts instead of saving the entire annotation array
 
-export async function saveAnnotationsForPage(currentAnnotations: AnnotationItem[], currentPageUrl: string, currentTitle?: string): Promise<{ success: boolean; message: string }> {
-  const filename = getAnnotationFilename(currentPageUrl);
-  console.log(`Saving ${currentAnnotations.length} annotations to ${filename}...`);
-
-  // Save top-level title for dashboard, and keep metadata for backwards compatibility
-  const annotationData = {
-    title: currentTitle || '',
-    metadata: {
-      url: currentPageUrl,
-      timestamp: new Date().toISOString(),
-      count: currentAnnotations.length
-    },
-    annotations: currentAnnotations
-  };
-
-  const annotationsJSON = JSON.stringify(annotationData, null, 2);
-
-  try {
-    const res = await uploadBlob(filename, annotationsJSON);
-    if (res.success) {
-      console.log(res.data);
-      return {
-        success: true,
-        message: `Successfully saved ${currentAnnotations.length} annotation${currentAnnotations.length !== 1 ? 's' : ''} to ${filename}!`
-      };
-    }
-
-    return { success: false, message: res.error || 'Unknown error' };
-  } catch (error) {
-    console.error('Save error:', error);
-    return {
-      success: false,
-      message: `Save failed: ${error instanceof Error ? error.message : 'Unknown error'}`
-    };
-  }
-}
 

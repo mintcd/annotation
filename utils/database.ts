@@ -1,90 +1,171 @@
-import { resolveApiBase } from './api';
 
-export interface BlobListFile {
-  url: string;
-  pathname: string;
-  size: number;
-  uploadedAt: string;
+// On the client, relative URLs work fine.
+// On the server (Cloudflare Worker), fetch() requires absolute URLs;
+// worker/index.ts stores the request origin on globalThis.__origin.
+function getBase(): string {
+  if (typeof window !== 'undefined') return '';
+  return globalThis.__origin ?? '';
 }
 
-const BUCKET = 'annotations';
+export interface Page {
+  id: string;
+  url: string;
+  title: string;
+  number_of_scripts: number;
+  number_of_annotations: number;
+  created_at: string;
+  updated_at: string;
+}
 
-export async function getBlob(path: string, serverOrigin?: string): Promise<string | null> {
-  const apiEndpoint = resolveApiBase(serverOrigin);
-  if (!apiEndpoint) throw new Error('API endpoint not configured');
-  const base = apiEndpoint.replace(/\/$/, '');
-  const response = await fetch(`${base}/blob/get?path=${encodeURIComponent(path)}&bucket=${encodeURIComponent(BUCKET)}`, {
+export interface Annotation {
+  id: string;
+  page_id: string;
+  text: string;
+  html: string | null;
+  color: string;
+  comment: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// ===== Pages API =====
+
+export async function listPages(): Promise<Page[]> {
+  const base = getBase();
+  const response = await fetch(`${base}/api/pages`, {
     cache: 'no-store'
   });
 
   if (!response.ok) {
-    if (response.status === 404) return null;
-    throw new Error(`Failed to fetch blob (${response.status}): ${response.statusText}`);
+    throw new Error(`Failed to list pages: ${response.status}`);
+  }
+
+  return await response.json();
+}
+
+export async function getPage(url: string): Promise<Page | null> {
+  const base = getBase();
+  const response = await fetch(`${base}/api/pages?url=${encodeURIComponent(url)}`, {
+    cache: 'no-store'
+  });
+
+  if (response.status === 404) return null;
+
+  if (!response.ok) {
+    throw new Error(`Failed to get page: ${response.status}`);
+  }
+
+  return await response.json();
+}
+
+export async function createOrUpdatePage(
+  url: string,
+  title: string,
+  numberOfScripts: number = 0,
+): Promise<Page> {
+  const base = getBase();
+  const response = await fetch(`${base}/api/pages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, title, number_of_scripts: numberOfScripts })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to create page: ${response.status}`);
+  }
+
+  return await response.json();
+}
+
+export async function deletePage(url: string): Promise<void> {
+  const base = getBase();
+  const response = await fetch(`${base}/api/pages?url=${encodeURIComponent(url)}`, {
+    method: 'DELETE'
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to delete page: ${response.status}`);
+  }
+}
+
+// ===== Annotations API =====
+
+export async function getAnnotationsForPage(url: string): Promise<Annotation[]> {
+  const base = getBase();
+  const response = await fetch(`${base}/api/annotations?url=${encodeURIComponent(url)}`, {
+    cache: 'no-store'
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to get annotations: ${response.status}`);
+  }
+
+  return await response.json();
+}
+
+export async function createAnnotation(
+  url: string,
+  text: string,
+  html?: string,
+  color?: string,
+  comment?: string,
+): Promise<Annotation> {
+  const base = getBase();
+  const response = await fetch(`${base}/api/annotations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, text, html, color, comment })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to create annotation: ${response.status}`);
+  }
+
+  return await response.json();
+}
+
+export async function updateAnnotation(
+  id: string,
+  text?: string,
+  html?: string,
+  color?: string,
+  comment?: string,
+): Promise<Annotation> {
+  const base = getBase();
+  const response = await fetch(`${base}/api/annotations/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, text, html, color, comment })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to update annotation: ${response.status}`);
+  }
+
+  return await response.json();
+}
+
+export async function deleteAnnotation(id: string): Promise<void> {
+  const base = getBase();
+  const response = await fetch(`${base}/api/annotations?id=${id}`, {
+    method: 'DELETE'
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to delete annotation: ${response.status}`);
+  }
+}
+
+export async function getAnnotationHtml(id: string): Promise<string> {
+  const base = getBase();
+  const response = await fetch(`${base}/api/annotations/${id}/html`, {
+    cache: 'no-store'
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to get annotation HTML: ${response.status}`);
   }
 
   return await response.text();
-}
-
-export async function uploadBlob(path: string, content: string, serverOrigin?: string): Promise<{ success: boolean; data?: unknown; error?: string }> {
-  const apiEndpoint = resolveApiBase(serverOrigin);
-  if (!apiEndpoint) return { success: false, error: 'API endpoint not configured' };
-  const base = apiEndpoint.replace(/\/$/, '');
-
-  try {
-    const response = await fetch(`${base}/blob/upload?path=${encodeURIComponent(path)}&bucket=${encodeURIComponent(BUCKET)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content })
-    });
-
-    if (response.ok) {
-      const data = await response.json().catch(() => null);
-      return { success: true, data };
-    }
-
-    const json = await response.json().catch(() => ({}));
-    return { success: false, error: json.error || `HTTP ${response.status}` };
-  } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-export async function deleteBlob(path: string, serverOrigin?: string): Promise<{ success: boolean; error?: string }> {
-  const apiEndpoint = resolveApiBase(serverOrigin);
-  if (!apiEndpoint) return { success: false, error: 'API endpoint not configured' };
-  const base = apiEndpoint.replace(/\/$/, '');
-
-  try {
-    const response = await fetch(`${base}/blob/delete?path=${encodeURIComponent(path)}&bucket=${encodeURIComponent(BUCKET)}`, {
-      method: 'DELETE'
-    });
-
-    if (response.ok) {
-      return { success: true };
-    }
-
-    const json = await response.json().catch(() => ({}));
-    return { success: false, error: json.error || `HTTP ${response.status}` };
-  } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : String(err) };
-  }
-}
-
-export async function listBlobs(bucket = 'annotations', type = '.json', serverOrigin?: string): Promise<BlobListFile[]> {
-  const apiEndpoint = resolveApiBase(serverOrigin);
-  if (!apiEndpoint) throw new Error('API endpoint not configured');
-  const base = apiEndpoint.replace(/\/$/, '');
-  const url = `${base}/blob/list?bucket=${encodeURIComponent(bucket)}&type=${encodeURIComponent(type)}`;
-  const response = await fetch(url, {
-    cache: 'no-store',
-  });
-  console.log('Fetched annotations from', url);
-
-  if (!response.ok) {
-    throw new Error(`Failed to list blobs: ${response.status}`);
-  }
-
-  const files = await response.json();
-  return files as BlobListFile[];
 }
 
