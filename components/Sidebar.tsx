@@ -8,7 +8,7 @@ import { useResize, useClickOutside, useMobileToggle, usePreventScroll } from ".
 import AnnotationList from "./AnnotationList";
 import { sortAnnotations, sortOptions } from "../utils/annotations";
 import type { SortOption } from "../utils/annotations";
-import { BoxList, Sort } from "./icons";
+import { BoxList, Sort } from "../app/icons";
 import Dropdown from "./Dropdown";
 import { escapeAttrValue } from "../utils/string";
 import styles from "../styles/Sidebar.styles";

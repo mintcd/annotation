@@ -1,10 +1,11 @@
-import type { Env } from "../utils/env";
-import handler from "vinext/server/app-router-entry";
+import handler from 'vinext/server/app-router-entry';
+import type { Env } from '../utils/env';
 
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+    globalThis.__origin = url.origin;
     globalThis.__env = env;
-    globalThis.__origin = new URL(request.url).origin;
     return handler.fetch(request);
   },
-} satisfies ExportedHandler<Env>;
+};

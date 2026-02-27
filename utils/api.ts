@@ -113,7 +113,7 @@ export async function listPages(limit: number = 100, offset: number = 0): Promis
  */
 export async function getPage(url: string): Promise<Page | null> {
   const response = await fetch(
-    `${API_BASE}/api/pages?url=${encodeURIComponent(url)}`
+    `${API_BASE}/api/pages?url=${url}`
   );
 
   if (response.status === 404) {
@@ -153,7 +153,7 @@ export async function createOrUpdatePage(
  */
 export async function deletePage(url: string): Promise<void> {
   const response = await fetch(
-    `${API_BASE}/api/pages?url=${encodeURIComponent(url)}`,
+    `${API_BASE}/api/pages?url=${url}`,
     { method: 'DELETE' }
   );
 
@@ -169,7 +169,7 @@ export async function deletePage(url: string): Promise<void> {
  */
 export async function getAnnotationsForPage(url: string): Promise<Annotation[]> {
   const response = await fetch(
-    `${API_BASE}/api/annotations?url=${encodeURIComponent(url)}`
+    `${API_BASE}/api/annotations?url=${url}`
   );
 
   if (!response.ok) {

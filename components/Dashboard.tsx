@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from 'framer-motion';
-import { Folder, ChevronDown, ChevronRight } from './icons';
+import { Folder, ChevronDown, ChevronRight } from '../app/icons';
 import Link from "next/link";
 import { useClient, useMobile } from "../hooks";
 import { deletePage as deletePageAPI, deleteAnnotation as deleteAnnotationAPI, updateAnnotation as updateAnnotationAPI } from '../utils/database';
@@ -344,7 +344,7 @@ export default function Dashboard() {
                         if (e.key === 'Enter') {
                           const url = (e.currentTarget as HTMLInputElement).value.trim();
                           if (url) {
-                            window.location.href = `?url=${encodeURIComponent(url)}`;
+                            window.location.href = `?url=${url}`;
                           }
                         }
                       }}
@@ -353,7 +353,7 @@ export default function Dashboard() {
                       type="button"
                       onClick={() => {
                         const url = enterUrl.trim();
-                        if (url) window.location.href = `?url=${encodeURIComponent(url)}`;
+                        if (url) window.location.href = `?url=${url}`;
                       }}
                       style={styles.annotateButton}
                       onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#1D4ED8'}
@@ -499,7 +499,7 @@ export default function Dashboard() {
                   if (e.key === 'Enter') {
                     const url = (e.currentTarget as HTMLInputElement).value.trim();
                     if (url) {
-                      window.location.href = `?url=${encodeURIComponent(url)}`;
+                      window.location.href = `?url=${url}`;
                     }
                   }
                 }}
@@ -508,7 +508,7 @@ export default function Dashboard() {
                 type="button"
                 onClick={() => {
                   const url = enterUrl.trim();
-                  if (url) window.location.href = `?url=${encodeURIComponent(url)}`;
+                  if (url) window.location.href = `?url=${url}`;
                 }}
                 style={styles.annotateButton}
                 onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#1D4ED8'}
@@ -663,7 +663,7 @@ export default function Dashboard() {
                 {/* Action buttons - Mobile responsive */}
                 <div style={styles.actionButtons}>
                   <Link
-                    href={`?url=${encodeURIComponent(displayedUrl)}`}
+                    href={`?url=${displayedUrl}`}
                     style={styles.viewPageButton}
                     onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#1D4ED8'}
                     onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#2563EB'}
@@ -724,7 +724,7 @@ export default function Dashboard() {
                         if (e.key === 'Enter') {
                           const url = (e.currentTarget as HTMLInputElement).value.trim();
                           if (url) {
-                            window.location.href = `?url=${encodeURIComponent(url)}`;
+                            window.location.href = `?url=${url}`;
                           }
                         }
                       }}
@@ -733,7 +733,7 @@ export default function Dashboard() {
                       type="button"
                       onClick={() => {
                         const url = enterUrl.trim();
-                        if (url) window.location.href = `?url=${encodeURIComponent(url)}`;
+                        if (url) window.location.href = `?url=${url}`;
                       }}
                       style={styles.emptyStateAnnotateButton}
                       onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#1D4ED8'}

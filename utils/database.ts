@@ -45,7 +45,7 @@ export async function listPages(): Promise<Page[]> {
 
 export async function getPage(url: string): Promise<Page | null> {
   const base = getBase();
-  const response = await fetch(`${base}/api/pages?url=${encodeURIComponent(url)}`, {
+  const response = await fetch(`${base}/api/pages?url=${url}`, {
     cache: 'no-store'
   });
 
@@ -79,7 +79,7 @@ export async function createOrUpdatePage(
 
 export async function deletePage(url: string): Promise<void> {
   const base = getBase();
-  const response = await fetch(`${base}/api/pages?url=${encodeURIComponent(url)}`, {
+  const response = await fetch(`${base}/api/pages?url=${url}`, {
     method: 'DELETE'
   });
 
@@ -92,7 +92,7 @@ export async function deletePage(url: string): Promise<void> {
 
 export async function getAnnotationsForPage(url: string): Promise<Annotation[]> {
   const base = getBase();
-  const response = await fetch(`${base}/api/annotations?url=${encodeURIComponent(url)}`, {
+  const response = await fetch(`${base}/api/annotations?url=${url}`, {
     cache: 'no-store'
   });
 

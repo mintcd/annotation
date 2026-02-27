@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef } from "react";
-import { Highlighter } from "./icons";
+import { Highlighter } from "../app/icons";
 import { useSelection } from "../hooks/MenuOnRange.hooks";
 import menuStyles from "../styles/MenuOnRange.styles";
 import { useAnnotationContext } from "../context/Annotator.context";
