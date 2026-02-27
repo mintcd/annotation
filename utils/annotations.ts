@@ -1,6 +1,7 @@
 import { listPages, getAnnotationsForPage, Page, Annotation } from './database';
 
 
+
 export type SortOption = 'created-asc' | 'created-desc' | 'modified-asc' | 'modified-desc' | 'dom-order';
 
 export function sortAnnotations(annotations: AnnotationItem[], sortOption: SortOption): AnnotationItem[] {
@@ -65,36 +66,23 @@ function convertToAnnotationItem(annotation: Annotation): AnnotationItem {
 
 export async function loadAnnotations(): Promise<AnnotationPage[]> {
   try {
-    const pages: Page[] = await listPages();
-
-    const annotationPages: AnnotationPage[] = [];
-
-    for (const page of pages) {
-      try {
+    const pages = await listPages();
+    const annotationPages = await Promise.all(
+      pages.map(async (page: Page) => {
         const annotations = await getAnnotationsForPage(page.url);
-
-        annotationPages.push({
+        return {
           url: page.url,
-          filename: `${page.id}.json`, // Not really used anymore but kept for compatibility
+          filename: `${page.id}.json`,
           timestamp: page.created_at,
           title: page.title,
           count: page.number_of_annotations,
           annotations: annotations.map(convertToAnnotationItem),
-          blobUrl: '', // Not used anymore
-          uploadedAt: page.updated_at
-        });
-      } catch (error) {
-        console.error(`Error processing page ${page.url}:`, error);
-        // Continue with other pages
-      }
-    }
-
-    console.log(`Fetched ${annotationPages.length} pages`);
-
-    annotationPages.sort((a, b) =>
-      new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
+          blobUrl: '',
+          uploadedAt: page.updated_at,
+        } satisfies AnnotationPage;
+      })
     );
-
+    console.log(`Fetched ${annotationPages.length} pages`);
     return annotationPages;
   } catch (error) {
     console.error('[Dashboard] Error fetching annotations:', error);
@@ -102,26 +90,12 @@ export async function loadAnnotations(): Promise<AnnotationPage[]> {
   }
 }
 
-
 export async function loadAnnotationsForPage(pageUrl: string): Promise<AnnotationItem[]> {
   try {
     const annotations = await getAnnotationsForPage(pageUrl);
-
-    if (!annotations || annotations.length === 0) {
-      // No annotations exist yet - this is expected on first visit
-      return [];
-    }
-    console.log(annotations)
     console.log(`Loaded ${annotations.length} annotations for ${pageUrl}`);
     return annotations.map(convertToAnnotationItem);
   } catch (error) {
-    // Check if it's a 404 (no annotations yet) vs a real error
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    if (errorMessage.includes('404')) {
-      // No annotations exist yet - silently return empty array
-      return [];
-    }
-    // Log other errors that might indicate real problems
     console.error('Error loading annotations:', error);
     return [];
   }

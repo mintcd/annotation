@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from 'framer-motion';
-import { Folder, ChevronDown, ChevronRight } from '../public/icons';
+import { Folder, ChevronDown, ChevronRight } from './icons';
 import Link from "next/link";
 import { useClient, useMobile } from "../hooks";
 import { deletePage as deletePageAPI, deleteAnnotation as deleteAnnotationAPI, updateAnnotation as updateAnnotationAPI } from '../utils/database';
@@ -10,6 +10,7 @@ import PromptBox from './PromptBox';
 import AnnotationList from './AnnotationList';
 import styles from '../styles/Dashboard.styles';
 import { normalizeUrl } from '../utils/url';
+import { loadAnnotations } from "@/utils/annotations";
 
 
 interface AnnotationPage {
@@ -23,16 +24,15 @@ interface AnnotationPage {
   uploadedAt: string;
 }
 
-type DashboardProps = {
-  annotationPages: AnnotationPage[];
-};
 
-export default function Dashboard({ annotationPages }: DashboardProps) {
+
+export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedUrl, setSelectedUrl] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const isClient = useClient();
   const { isMobile } = useMobile();
+  const [annotationPages, setAnnotationPages] = useState<AnnotationPage[]>([]);
 
   // Delete and edit state
   const [deletingPages, setDeletingPages] = useState<Set<string>>(new Set());
@@ -41,30 +41,33 @@ export default function Dashboard({ annotationPages }: DashboardProps) {
   // Prompt state
   const [deletePagePrompt, setDeletePagePrompt] = useState<{ pageUrl: string; filename: string } | null>(null);
   const [deleteAnnotationPrompt, setDeleteAnnotationPrompt] = useState<{ pageUrl: string; annotationId: string } | null>(null);
-
-  // Manage annotationPages locally for immediate UI updates
-  const [localAnnotationPages, setLocalAnnotationPages] = useState(annotationPages);
-
-  const serverOrigin = isClient ? window.location.origin : '';
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    const loadAnnotationPages = async () => {
+      const annotationPages = await loadAnnotations();
+      setAnnotationPages(annotationPages);
+    };
+    loadAnnotationPages();
+  }, []);
 
   // Create a map of URL to AnnotationPage from local state
   const pagesByUrl = useMemo(() => {
     const map: Record<string, AnnotationPage> = {};
-    localAnnotationPages.forEach(page => {
+    annotationPages.forEach(page => {
       const normalizedUrl = normalizeUrl(page.url);
       map[normalizedUrl] = page;
     });
     return map;
-  }, [localAnnotationPages]);
+  }, [annotationPages]);
 
   // Filter by search query
   const filteredPages = useMemo(() => {
-    if (!searchQuery.trim()) return localAnnotationPages;
+    if (!searchQuery.trim()) return annotationPages;
 
     const query = searchQuery.toLowerCase();
 
-    return localAnnotationPages.filter(page => {
+    return annotationPages.filter(page => {
       // Check if URL matches
       if (page.url.toLowerCase().includes(query)) return true;
 
@@ -74,7 +77,7 @@ export default function Dashboard({ annotationPages }: DashboardProps) {
         ann.comment?.toLowerCase().includes(query)
       );
     });
-  }, [localAnnotationPages, searchQuery]);
+  }, [annotationPages, searchQuery]);
 
   // Group pages by their origin + directory path (so folders reflect fetch location)
   const groupedByFolder = useMemo(() => {
@@ -122,8 +125,8 @@ export default function Dashboard({ annotationPages }: DashboardProps) {
   const displayedPage = displayedNormalizedUrl ? pagesByUrl[displayedNormalizedUrl] : null;
   const displayedUrl = displayedPage ? displayedPage.url : null;
 
-  const totalAnnotations = localAnnotationPages.reduce((sum, page) => sum + page.annotations.length, 0);
-  const totalUrls = localAnnotationPages.length;
+  const totalAnnotations = annotationPages.reduce((sum, page) => sum + page.annotations.length, 0);
+  const totalUrls = annotationPages.length;
   const annotationsRef = useRef<HTMLDivElement | null>(null);
   const [enterUrl, setEnterUrl] = useState('');
 
@@ -143,11 +146,11 @@ export default function Dashboard({ annotationPages }: DashboardProps) {
     setDeletePagePrompt(null);
 
     // Store the page for potential restoration if deletion fails
-    const pageToDelete = localAnnotationPages.find(page => page.url === pageUrl);
+    const pageToDelete = annotationPages.find(page => page.url === pageUrl);
     if (!pageToDelete) return;
 
     // Immediately remove from local state for instant UI feedback
-    setLocalAnnotationPages(prev => prev.filter(page => page.url !== pageUrl));
+    setAnnotationPages(prev => prev.filter(page => page.url !== pageUrl));
 
     // If the deleted page was currently selected, clear selection
     if (selectedUrl === pageUrl) {
@@ -160,7 +163,7 @@ export default function Dashboard({ annotationPages }: DashboardProps) {
       await deletePageAPI(pageUrl);
     } catch (error) {
       // Restore the page in local state since deletion failed
-      setLocalAnnotationPages(prev => [...prev, pageToDelete].sort((a, b) =>
+      setAnnotationPages(prev => [...prev, pageToDelete].sort((a, b) =>
         new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
       ));
     } finally {
@@ -183,7 +186,7 @@ export default function Dashboard({ annotationPages }: DashboardProps) {
     setDeleteAnnotationPrompt(null);
 
     // Find the annotation to delete for potential restoration if deletion fails
-    const pageToUpdate = localAnnotationPages.find(page => page.url === pageUrl);
+    const pageToUpdate = annotationPages.find(page => page.url === pageUrl);
     const annotationToDelete = pageToUpdate?.annotations.find(ann => ann.id === annotationId);
     if (!pageToUpdate || !annotationToDelete) {
       alert('Annotation not found');
@@ -191,7 +194,7 @@ export default function Dashboard({ annotationPages }: DashboardProps) {
     }
 
     // Immediately update local state for instant UI feedback
-    setLocalAnnotationPages(prev => prev.map(page =>
+    setAnnotationPages(prev => prev.map(page =>
       page.url === pageUrl
         ? {
           ...page,
@@ -206,7 +209,7 @@ export default function Dashboard({ annotationPages }: DashboardProps) {
       await deleteAnnotationAPI(annotationId);
     } catch (error) {
       // Restore the annotation in local state since deletion failed
-      setLocalAnnotationPages(prev => prev.map(page =>
+      setAnnotationPages(prev => prev.map(page =>
         page.url === pageUrl
           ? {
             ...page,
@@ -231,12 +234,12 @@ export default function Dashboard({ annotationPages }: DashboardProps) {
     if (!editingComment) return;
 
     // Store the current comment for potential restoration if save fails
-    const pageToUpdate = localAnnotationPages.find(page => page.url === editingComment.pageUrl);
+    const pageToUpdate = annotationPages.find(page => page.url === editingComment.pageUrl);
     const annotationToUpdate = pageToUpdate?.annotations.find(ann => ann.id === editingComment.annotationId);
     const oldComment = annotationToUpdate?.comment;
 
     // Immediately update local state for instant UI feedback
-    setLocalAnnotationPages(prev => prev.map(page =>
+    setAnnotationPages(prev => prev.map(page =>
       page.url === editingComment.pageUrl
         ? {
           ...page,
@@ -264,7 +267,7 @@ export default function Dashboard({ annotationPages }: DashboardProps) {
       await updateAnnotationAPI(editingComment.annotationId, annotation.text, annotation.html);
     } catch (error) {
       // Restore the old comment in local state since save failed
-      setLocalAnnotationPages(prev => prev.map(page =>
+      setAnnotationPages(prev => prev.map(page =>
         page.url === editingComment.pageUrl
           ? {
             ...page,

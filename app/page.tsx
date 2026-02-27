@@ -1,7 +1,7 @@
 import Annotator from "@/components/Annotator";
 import Dashboard from "@/components/Dashboard";
 import { getClonedPage } from '@/utils/clone';
-import { loadAnnotations, loadAnnotationsForPage } from "@/utils/annotations";
+import { loadAnnotationsForPage } from "@/utils/annotations";
 
 export async function generateMetadata({ searchParams }: { searchParams: Promise<{ [key: string]: string | undefined }> }) {
   const { url } = await searchParams;
@@ -24,9 +24,7 @@ export default async function Page({
 
   const { url } = await searchParams;
   if (!url) {
-
-    const annotationPages = await loadAnnotations();
-    return <Dashboard annotationPages={annotationPages} />;
+    return <Dashboard />;
   }
 
   const annotations = await loadAnnotationsForPage(url);
