@@ -14,14 +14,22 @@ type AnnotatorProps = {
   annotations?: AnnotationItem[];
   title?: string;
   apiBase: string;
-  children: React.ReactNode;
+  body: string;
   pageUrl: string;
   scripts?: ScriptItem[];
 }
 
-export default function Annotator({ annotations, title, apiBase, children, pageUrl, scripts }: AnnotatorProps) {
+export default function Annotator({ annotations, title, apiBase, body, pageUrl, scripts }: AnnotatorProps) {
   const clonedRef = useRef<HTMLDivElement>(null);
-  useScriptLoader(scripts || [], pageUrl, apiBase);
+  const [clientBody, setClientBody] = useState<string | null>(null);
+
+  // Render the cloned HTML only on the client side (after mount)
+  useEffect(() => {
+    setClientBody(body);
+  }, [body]);
+
+  // Only load scripts after the body HTML is mounted in the DOM
+  useScriptLoader(clientBody ? (scripts || []) : [], pageUrl, apiBase);
   const { totalTime, error, success, numberOfScripts, executedScripts, kvData } = useScriptExecutionTracker(
     pageUrl,
     apiBase
@@ -56,7 +64,9 @@ export default function Annotator({ annotations, title, apiBase, children, pageU
   return (
     <>
       <div ref={clonedRef}>
-        {children}
+        {clientBody !== null && (
+          <div className="cloned-content" dangerouslySetInnerHTML={{ __html: clientBody }} />
+        )}
       </div>
       <AnnotationContext
         initialAnnotations={matchedAnnotations}
