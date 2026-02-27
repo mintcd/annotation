@@ -14,14 +14,20 @@ type AnnotatorProps = {
   annotations?: AnnotationItem[];
   title?: string;
   apiBase: string;
-  children: React.ReactNode;
   pageUrl: string;
   scripts?: ScriptItem[];
+  body: string;
 }
 
-export default function Annotator({ annotations, title, apiBase, children, pageUrl, scripts }: AnnotatorProps) {
+export default function Annotator({ annotations, title, apiBase, pageUrl, scripts, body }: AnnotatorProps) {
   const clonedRef = useRef<HTMLDivElement>(null);
-  useScriptLoader(scripts || [], pageUrl, apiBase);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useScriptLoader(mounted ? (scripts || []) : [], pageUrl, apiBase);
   const { totalTime, error, success, numberOfScripts, executedScripts, kvData } = useScriptExecutionTracker(
     pageUrl,
     apiBase
@@ -56,7 +62,7 @@ export default function Annotator({ annotations, title, apiBase, children, pageU
   return (
     <>
       <div ref={clonedRef}>
-        {children}
+        {mounted && <div className="cloned-content" dangerouslySetInnerHTML={{ __html: body }} />}
       </div>
       <AnnotationContext
         initialAnnotations={matchedAnnotations}

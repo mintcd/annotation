@@ -47,8 +47,7 @@ export default async function Page({
       apiBase={apiBase}
       scripts={scripts}
       pageUrl={url}
-    >
-      <div className="cloned-content" dangerouslySetInnerHTML={{ __html: body }} suppressHydrationWarning />
-    </Annotator>
+      body={body}
+    />
   );
 }

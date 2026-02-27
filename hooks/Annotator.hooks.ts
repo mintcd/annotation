@@ -413,7 +413,7 @@ export function useScriptExecutionTracker(
     const onProxyEvent = (ev: Event) => {
       try {
         const detail = (ev as CustomEvent).detail;
-        const key = detail && detail.url ? String(detail.url) : `signal-${Date.now()}-${Math.random()}`;
+        const key = detail && (detail.url || detail.id) ? String(detail.url || detail.id) : `signal-${Date.now()}-${Math.random()}`;
         if (!signaled.has(key)) {
           signaled.add(key);
           lastChangeTime = Date.now();
