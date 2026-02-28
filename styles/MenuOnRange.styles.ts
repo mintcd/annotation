@@ -1,11 +1,18 @@
 import { useMobile, useElementWidth } from "../hooks";
+import { useAnnotationContext } from "../context/Annotator.context";
 
 export default function useMenuOnRangeStyles(ref: React.RefObject<HTMLElement | null>, range: Range | null) {
   const isMobile = useMobile();
   const menuWidth = useElementWidth(ref, range);
+  const { iframeEl } = useAnnotationContext();
+
+  // range.getBoundingClientRect() is relative to the iframe's viewport.
+  // position:fixed on the parent uses the parent's viewport, so add the iframe's offset.
+  const iframeOffset = iframeEl?.getBoundingClientRect() ?? { top: 0, left: 0 };
+
   const position = range ? {
-    top: range.getBoundingClientRect().bottom + 10,
-    left: (range.getBoundingClientRect().left + (range.getBoundingClientRect().width / 2) - (menuWidth / 2)),
+    top: range.getBoundingClientRect().bottom + 10 + iframeOffset.top,
+    left: (range.getBoundingClientRect().left + (range.getBoundingClientRect().width / 2) - (menuWidth / 2)) + iframeOffset.left,
   } : { top: 0, left: 0 };
   return {
     menuContainer: {

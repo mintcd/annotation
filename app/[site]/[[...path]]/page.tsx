@@ -56,7 +56,11 @@ export default async function SitePage({
   // Reconstruct the original URL and strip tracking params
   const url = normalizeUrl(appPathToPageUrl(website.origin, path, search));
 
+  // Build the same-origin frame URL served by /_frame/{slug}/...
+  const framePathname = path?.length ? path.join('/') : '';
+  const frameUrl = `/_frame/${site}${framePathname ? '/' + framePathname : ''}${search}`;
+
   const annotations = await loadAnnotationsForPage(url);
 
-  return <CloneLoader url={url} annotations={annotations} />;
+  return <CloneLoader frameUrl={frameUrl} pageUrl={url} annotations={annotations} />;
 }

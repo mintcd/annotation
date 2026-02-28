@@ -1,9 +1,9 @@
 "use client";
 
-import { useRef, useCallback, useState, useEffect } from 'react';
-import { useClickHref, useScriptExecutionTracker, useRangeMatching, useOptimalContentContainer, useScriptLoader } from '../hooks/Annotator.hooks';
+import { useRef, useCallback, useState, useEffect, type RefObject } from 'react';
+import { useClickHref, useRangeMatching } from '../hooks/Annotator.hooks';
 import Logger from './Logger';
-import { AnnotationContext, useAnnotationContext } from '../context/Annotator.context';
+import { AnnotationContext } from '../context/Annotator.context';
 import Sidebar from './Sidebar';
 import MenuOnRange from './MenuOnRange';
 import MenuOnFocus from './MenuOnFocus';
@@ -14,27 +14,81 @@ type AnnotatorProps = {
   annotations?: AnnotationItem[];
   title?: string;
   apiBase: string;
-  children: React.ReactNode;
   pageUrl: string;
-  scripts?: ScriptItem[];
+  /** When set, renders an <iframe> pointing at this URL (same-origin frame). */
+  iframeUrl: string;
 }
 
-export default function Annotator({ annotations, title, apiBase, children, pageUrl, scripts }: AnnotatorProps) {
-  const clonedRef = useRef<HTMLDivElement>(null);
-  useScriptLoader(scripts || [], pageUrl, apiBase);
-  const { totalTime, error, success, numberOfScripts, executedScripts, kvData } = useScriptExecutionTracker(
-    pageUrl,
-    apiBase
-  );
-  const { ref: contentRef, ready: containerReady } = useOptimalContentContainer(clonedRef, success);
-  const { rangeResults, allMatched, isMatching, matchedAnnotations } = useRangeMatching(
-    contentRef, annotations, success,
-    pageUrl,
-    apiBase,
-    executedScripts,
-    kvData
-  );
+export default function Annotator({ annotations, title, apiBase, pageUrl, iframeUrl }: AnnotatorProps) {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  // contentRef points to the iframe's body once it's loaded — used by range matching.
+  const contentRef = useRef<HTMLElement | null>(null);
+  const [iframeReady, setIframeReady] = useState(false);
+  // Track the iframe element reactively so AnnotationContext children can offset positions.
+  const [iframeEl, setIframeEl] = useState<HTMLIFrameElement | null>(null);
 
+  // When the iframe finishes loading, point contentRef at its body.
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    const onLoad = () => {
+      contentRef.current = iframe.contentDocument?.body ?? null;
+      setIframeEl(iframe);
+      setIframeReady(false);       // reset to let useRangeMatching re-run
+      requestAnimationFrame(() => setIframeReady(true));
+    };
+    iframe.addEventListener('load', onLoad);
+    return () => iframe.removeEventListener('load', onLoad);
+  }, [iframeUrl]);
+
+  // Forward pointer and selection events from inside the iframe to the parent document
+  // so that hooks listening on `document` (MenuOnRange, etc.) receive them.
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+
+    const attach = () => {
+      const iDoc = iframe.contentDocument;
+      if (!iDoc) return;
+
+      const fwd = (e: Event) => {
+        try {
+          document.dispatchEvent(new (e.constructor as typeof Event)(e.type, { bubbles: true, cancelable: e.cancelable }));
+        } catch { /* ignore */ }
+      };
+
+      iDoc.addEventListener('pointerdown', fwd, { capture: true });
+      iDoc.addEventListener('pointerup', fwd, { capture: true });
+      iDoc.addEventListener('mousedown', fwd, { capture: true });
+      iDoc.addEventListener('touchstart', fwd, { capture: true, passive: true });
+      iDoc.addEventListener('selectionchange', fwd);
+
+      // Store cleanup on the iframe so we can run it before re-attaching.
+      (iframe as HTMLIFrameElement & { _fwdCleanup?: () => void })._fwdCleanup = () => {
+        iDoc.removeEventListener('pointerdown', fwd, { capture: true });
+        iDoc.removeEventListener('pointerup', fwd, { capture: true });
+        iDoc.removeEventListener('mousedown', fwd, { capture: true });
+        iDoc.removeEventListener('touchstart', fwd, { capture: true });
+        iDoc.removeEventListener('selectionchange', fwd);
+      };
+    };
+
+    const onLoad = () => {
+      (iframe as HTMLIFrameElement & { _fwdCleanup?: () => void })._fwdCleanup?.();
+      attach();
+    };
+
+    iframe.addEventListener('load', onLoad);
+    attach(); // in case already loaded
+    return () => {
+      iframe.removeEventListener('load', onLoad);
+      (iframe as HTMLIFrameElement & { _fwdCleanup?: () => void })._fwdCleanup?.();
+    };
+  }, [iframeUrl]);
+
+  const { rangeResults, allMatched, isMatching, matchedAnnotations } = useRangeMatching(
+    contentRef, annotations, iframeReady, pageUrl, apiBase
+  );
 
   const [pendingHref, setPendingHref] = useState<string | null>(null);
   const closeModal = useCallback(() => setPendingHref(null), []);
@@ -51,19 +105,23 @@ export default function Annotator({ annotations, title, apiBase, children, pageU
     closeModal();
   }, [closeModal]);
 
-  useClickHref(clonedRef, setPendingHref);
+  useClickHref(iframeRef as RefObject<HTMLElement | null>, setPendingHref);
 
   return (
     <>
-      <div ref={clonedRef}>
-        {children}
-      </div>
+      <iframe
+        ref={iframeRef}
+        src={iframeUrl}
+        style={{ width: '100%', height: '100vh', border: 'none', display: 'block' }}
+        title={title || 'Annotated page'}
+      />
       <AnnotationContext
         initialAnnotations={matchedAnnotations}
         title={title}
-        contentReady={containerReady}
+        contentReady={iframeReady}
         pageUrl={pageUrl}
         contentRef={contentRef}
+        iframeEl={iframeEl}
       >
         <Sidebar />
         <MenuOnRange />
@@ -87,9 +145,9 @@ export default function Annotator({ annotations, title, apiBase, children, pageU
         />
       )}
 
-      {
-        (!allMatched && !isMatching) && <Logger info={{ totalTime, error, rangeResults, success, title, numberOfScripts, executedScripts }} />
-      }
+      {(!allMatched && !isMatching) && (
+        <Logger info={{ totalTime: 0, error: null, rangeResults, success: iframeReady, title, numberOfScripts: 0, executedScripts: 0 }} />
+      )}
     </>
   );
 }

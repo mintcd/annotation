@@ -11,11 +11,14 @@ type AnnotationContextProps = {
   pageUrl: string;
   title?: string;
   contentReady?: boolean;
-  contentRef: React.RefObject<HTMLDivElement | null>;
+  contentRef: React.RefObject<HTMLElement | null>;
+  /** The <iframe> element, when content is rendered inside one. */
+  iframeEl?: HTMLIFrameElement | null;
 };
 
 type AnnotationContextType = {
-  contentRef: React.RefObject<HTMLDivElement | null>;
+  contentRef: React.RefObject<HTMLElement | null>;
+  iframeEl?: HTMLIFrameElement | null;
   annotations: AnnotationItem[];
   pageUrl?: string;
   title?: string;
@@ -50,6 +53,7 @@ export function AnnotationContext({
   title,
   contentRef,
   contentReady,
+  iframeEl,
 }: AnnotationContextProps) {
   const [annotations, setAnnotations] = useState<AnnotationItem[]>(initialAnnotations);
   const [currentHighlightColor, setCurrentHighlightColor] = useState<string>("#87ceeb");
@@ -158,7 +162,7 @@ export function AnnotationContext({
         const updatedText = text !== undefined ? text : undefined;
         const updatedHtml = html !== undefined ? html : undefined;
         const updatedColor = color !== undefined ? color : undefined;
-        const updatedComment = comment !== undefined ? (comment.trim() || null) : undefined;
+        const updatedComment = comment !== undefined ? (comment.trim() || undefined) : undefined;
         await updateAnnotationAPI(id, updatedText, updatedHtml, updatedColor, updatedComment);
         setLastAutoSaveStatus({ success: true, message: "Annotation updated" });
       }
@@ -178,6 +182,7 @@ export function AnnotationContext({
 
   const value = {
     contentRef,
+    iframeEl,
     annotations,
     pageUrl,
     title,

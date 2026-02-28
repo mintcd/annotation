@@ -27,7 +27,9 @@ export function useSelection(menuRef: React.RefObject<HTMLElement | null>) {
 
   // Centralized finalizer: read current selection and set range/position
   const finalizeFromSelection = useCallback((ev?: Event) => {
-    const sel = window.getSelection();
+    // When content is inside an <iframe>, its selection lives in the iframe's window.
+    const iframeWin = contentRef.current?.ownerDocument?.defaultView;
+    const sel = (iframeWin ?? window).getSelection();
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
       setRange(null);
       return;
@@ -112,7 +114,7 @@ export function useSelection(menuRef: React.RefObject<HTMLElement | null>) {
 
     const text = range.toString();
     const { html } = cleanedHtml(rangeToHtml(range));
-    
+
     const container = contentRef.current;
     const startEl =
       range.startContainer.nodeType === Node.ELEMENT_NODE
@@ -127,12 +129,13 @@ export function useSelection(menuRef: React.RefObject<HTMLElement | null>) {
     }
 
     // Hide the live selection to avoid flicker while mutating DOM
-    const sel = window.getSelection();
+    const iframeWin = contentRef.current?.ownerDocument?.defaultView;
+    const sel = (iframeWin ?? window).getSelection();
     if (sel) sel.removeAllRanges();
 
     // Create annotation and get temp ID immediately
     const { tempId, promise } = await addAnnotation(text, html, currentHighlightColor);
-    
+
     // Highlight with temp ID immediately
     highlightRange(range, currentHighlightColor, tempId);
     setRange(null);

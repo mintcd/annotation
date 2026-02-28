@@ -813,9 +813,11 @@ export function useClickHref(
       if (href.startsWith('javascript:') || href.startsWith('#')) return;
 
       try {
-        const linkUrl = new URL(href, window.location.href);
+        // Resolve relative URLs against the document the element lives in
+        const base = (target.ownerDocument as Document | null)?.location?.href || window.location.href;
+        const linkUrl = new URL(href, base);
 
-        // If same origin, let the browser handle it
+        // If same origin, let the browser handle it (includes all proxied /_proxy/ links)
         if (linkUrl.origin === window.location.origin) return;
 
         // External link: notify by calling the callback
@@ -826,6 +828,34 @@ export function useClickHref(
         return;
       }
     };
+
+    // If the element is an <iframe>, clicks inside it don't bubble to the parent
+    // document — attach listener to the iframe's own contentDocument instead.
+    if ((el as HTMLElement).tagName === 'IFRAME') {
+      const iframe = el as HTMLIFrameElement;
+      let attached = false;
+
+      const attach = () => {
+        const iDoc = iframe.contentDocument;
+        if (!iDoc || attached) return;
+        iDoc.addEventListener('click', onClick);
+        attached = true;
+      };
+
+      const onLoad = () => {
+        // Each navigation replaces contentDocument; re-attach each time.
+        attached = false;
+        attach();
+      };
+
+      iframe.addEventListener('load', onLoad);
+      attach(); // in case the iframe is already loaded
+
+      return () => {
+        iframe.removeEventListener('load', onLoad);
+        iframe.contentDocument?.removeEventListener('click', onClick);
+      };
+    }
 
     el.addEventListener('click', onClick);
     return () => el.removeEventListener('click', onClick);

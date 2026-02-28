@@ -354,7 +354,8 @@ export function matchedRange(root: HTMLElement, searchText: string): Range | nul
   }
 
   // --- Collect text nodes (keep whitespace; skip highlighted wrappers)
-  const walker = document.createTreeWalker(
+  const ownerDoc = root.ownerDocument || document;
+  const walker = ownerDoc.createTreeWalker(
     root,
     NodeFilter.SHOW_TEXT,
     {
@@ -410,7 +411,7 @@ export function matchedRange(root: HTMLElement, searchText: string): Range | nul
         const startPos = positions[idx - m + 1];
         const endPos = positions[idx];
         // console.log(`[matchedRange] Full match found from position ${idx - m + 1} to ${idx}`);
-        const range = document.createRange();
+        const range = ownerDoc.createRange();
         range.setStart(startPos.node, startPos.offset);
         range.setEnd(endPos.node, endPos.offset + 1);
         return range;
@@ -493,7 +494,7 @@ function collectNodes(range: Range): (Node | Node[])[] {
       result.push(child);
     } else {
       // Check if intersects
-      const nr = document.createRange();
+      const nr = (child.ownerDocument || document).createRange();
       if (child.nodeType === Node.TEXT_NODE) {
         nr.selectNodeContents(child);
       } else {
@@ -552,7 +553,7 @@ function wrapNodes(nodes: Node[], color: string, id: string) {
   const parent = first.parentNode;
   if (!parent) return;
 
-  const wrapper = document.createElement('span');
+  const wrapper = (first.ownerDocument || document).createElement('span');
   wrapper.className = 'highlighted-text';
   wrapper.dataset.highlightId = id;
   wrapper.style.backgroundColor = color;
@@ -566,7 +567,7 @@ function wrapNodes(nodes: Node[], color: string, id: string) {
 
 function nodeFullyContained(rng: Range, node: Node): boolean {
   try {
-    const nr = document.createRange();
+    const nr = (node.ownerDocument || document).createRange();
     if (node.nodeType === Node.TEXT_NODE) {
       nr.selectNodeContents(node);
     } else {
