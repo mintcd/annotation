@@ -1,3 +1,4 @@
+"use client";
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import ColorPicker from "./ColorPicker";
 import { useAnnotationContext } from "../context/Annotator.context";
@@ -36,7 +37,8 @@ export default function MenuOnFocus() {
     }
   }, [showCommentInput, commentText.length]);
 
-  const anchorRect = focusedId ? highlightBoundingRect(focusedId) : null;
+  const iframeDoc = contentRef.current?.ownerDocument;
+  const anchorRect = focusedId ? highlightBoundingRect(focusedId, iframeDoc) : null;
 
   const handleColorSelect = (id: string, newColor: string) => {
     if (!contentRef.current) return;

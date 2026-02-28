@@ -12,6 +12,12 @@
 
 import { getEnv } from "../../../../utils/env";
 
+/** Appended to every proxied script — mirrors the snippet in clone.ts. */
+function makeSignalSnippet(url: string): string {
+  const payload = JSON.stringify({ url });
+  return `\n\n;// Proxy execution signal - do not remove\n(function(){try{var d=${payload};if(typeof window!=='undefined'){window.__proxy_script_executed=window.__proxy_script_executed||[];window.__proxy_script_executed.push(d.id||d.url);if(typeof window.__proxy_script_executed_dispatch!=='function'){window.__proxy_script_executed_dispatch=function(detail){try{var ev;try{ev=new CustomEvent('proxy:script-executed',{detail:detail});}catch(e){ev=document.createEvent('CustomEvent');ev.initCustomEvent('proxy:script-executed',false,false,detail);}if(typeof window!=='undefined'&&window.dispatchEvent){window.dispatchEvent(ev);}}catch(e){if(typeof console!=='undefined'&&console.warn)console.warn('proxy dispatch error',e);}}}try{window.__proxy_script_executed_dispatch(d);}catch(e){}}  }catch(err){if(typeof console!=='undefined'&&console.warn)console.warn('proxy signal error',err);} })();\n`;
+}
+
 export async function OPTIONS(request: Request) {
   const origin = request.headers.get("origin");
   return new Response(null, {
@@ -126,6 +132,9 @@ export async function GET(
           /\bsrc\s*:\s*(["'])(\/[^"'#?][^"']*)\1/g,
           (_m, q, p) => `src: ${q}/_proxy/${site}${p}${q}`
         );
+
+      // Append signal snippet so useIframeTracking can count script executions.
+      text += makeSignalSnippet(targetUrl);
 
       const contentType =
         (pathname.endsWith(".ts") ||

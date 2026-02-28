@@ -3,6 +3,7 @@ import React, { useMemo } from 'react';
 import { useHotkey, useMobile } from "../hooks";
 import colorPickerStyles from "../styles/ColorPicker.styles";
 import { highlightBoundingRect } from "../utils/highlight";
+import { useAnnotationContextOptional } from "../context/Annotator.context";
 
 type ColorPickerProps = {
   onColorSelect: (color: string) => void;
@@ -36,11 +37,14 @@ export default function ColorPicker({
   anchorId,
 }: ColorPickerProps) {
   const { viewportInfo } = useMobile();
+  const annotationCtx = useAnnotationContextOptional();
+  const iframeDoc = annotationCtx?.contentRef.current?.ownerDocument ?? document;
 
   const computedAnchorRect = useMemo(() => {
     if (!anchorId) return anchorRect ?? null;
-    return highlightBoundingRect(anchorId);
-  }, [anchorId, anchorRect]);
+    return highlightBoundingRect(anchorId, iframeDoc);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchorId, anchorRect, iframeDoc]);
 
   useHotkey((e) => e.key === 'Escape', onClose);
 

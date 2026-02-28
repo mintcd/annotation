@@ -39,6 +39,22 @@ function proxiedUrl(slug: string, absolute: string): string {
   } catch { return absolute; }
 }
 
+function isJsonOnly(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+    (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+    try { JSON.parse(trimmed); return true; } catch { return false; }
+  }
+  return false;
+}
+
+/** Returns the inline JS that records one proxy:script-executed signal. */
+function makeSignalScript(id: string): string {
+  const payload = JSON.stringify({ id });
+  return `;// Proxy execution signal - do not remove\n(function(){try{var d=${payload};if(typeof window!=='undefined'){window.__proxy_script_executed=window.__proxy_script_executed||[];window.__proxy_script_executed.push(d.id||d.url);if(typeof window.__proxy_script_executed_dispatch!=='function'){window.__proxy_script_executed_dispatch=function(detail){try{var ev;try{ev=new CustomEvent('proxy:script-executed',{detail:detail});}catch(e){ev=document.createEvent('CustomEvent');ev.initCustomEvent('proxy:script-executed',false,false,detail);}if(typeof window!=='undefined'&&window.dispatchEvent){window.dispatchEvent(ev);}  }catch(e){if(typeof console!=='undefined'&&console.warn)console.warn('proxy dispatch error',e);}}}try{window.__proxy_script_executed_dispatch(d);}catch(e){} } }catch(err){if(typeof console!=='undefined'&&console.warn)console.warn('proxy signal error',err);} })();`;
+}
+
 // Tiny script injected at top of <head> inside the iframe.
 // • Rewrites runtime root-relative URLs → /_proxy/{slug}/…
 function contentScript(slug: string): string {
@@ -154,6 +170,18 @@ export async function GET(
   $('script[src]').each((_, el) => {
     const src = $(el).attr('src') || '';
     if (isBlocked(absoluteUrl(base, src))) $(el).remove();
+  });
+
+  // Inject proxy:script-executed signals into inline scripts.
+  // External scripts get the signal appended by /_proxy/route.ts instead.
+  let scriptIndex = 0;
+  $('script:not([src])').each((_, el) => {
+    const type = $(el).attr('type') || '';
+    if (type && type !== 'text/javascript' && type !== 'module' && !type.includes('javascript')) return;
+    const content = $(el).text().trim();
+    if (!content || isJsonOnly(content)) return;
+    const id = `${targetUrl}#script-${scriptIndex++}`;
+    $(el).text(`${content}\n${makeSignalScript(id)}`);
   });
 
   // Rewrite src / href / srcset / action on all elements

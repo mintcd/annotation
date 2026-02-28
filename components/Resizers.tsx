@@ -1,3 +1,4 @@
+"use client";
 import { useState, useEffect, useCallback, useRef } from 'react';
 import sticksStyles from '../styles/Sticks.styles';
 import { useAnnotationContext } from '../context/Annotator.context';
@@ -19,8 +20,9 @@ export default function Sticks({ annotationId }: Props) {
   const [hiddenOnScroll, setHiddenOnScroll] = useState(false);
   const scrollTimeoutRef = useRef<number | null>(null);
 
-  const startRect = highlightStartPosition(annotationId);
-  const endRect = highlightEndPosition(annotationId);
+  const iframeDoc = contentRef.current?.ownerDocument ?? document;
+  const startRect = highlightStartPosition(annotationId, iframeDoc);
+  const endRect = highlightEndPosition(annotationId, iframeDoc);
 
   const handleMouseDown = useCallback((e: React.MouseEvent, type: 'start' | 'end') => {
     e.preventDefault();
@@ -31,10 +33,10 @@ export default function Sticks({ annotationId }: Props) {
     // initialize dragging rect to the current stick position so it doesn't jump
     try {
       if (type === 'start') {
-        const sr = highlightStartPosition(annotationId);
+        const sr = highlightStartPosition(annotationId, iframeDoc);
         if (sr) setDraggingRect(new DOMRect(sr.left, sr.top, sr.width, sr.height));
       } else {
-        const er = highlightEndPosition(annotationId);
+        const er = highlightEndPosition(annotationId, iframeDoc);
         if (er) setDraggingRect(new DOMRect(er.left, er.top, er.width, er.height));
       }
     } catch (err) {

@@ -1,23 +1,39 @@
+import { useMobile } from '@/hooks';
+import sidebarStyles from '@/styles/Sidebar.styles';
 import styled from 'styled-components';
 
 const Loader = () => {
+  const { isMobile, isIOS, viewportInfo } = useMobile();
+  const vi = viewportInfo as unknown as { layoutWidth: number; layoutHeight: number; visualWidth: number; visualHeight: number; offsetTop: number; offsetLeft: number };
+  const toggleStyle = sidebarStyles.toggleButton(isMobile, isIOS, vi);
   return (
-    <StyledWrapper>
-      <div className="spinner center">
-        <div className="spinner-blade" />
-        <div className="spinner-blade" />
-        <div className="spinner-blade" />
-        <div className="spinner-blade" />
-        <div className="spinner-blade" />
-        <div className="spinner-blade" />
-        <div className="spinner-blade" />
-        <div className="spinner-blade" />
-        <div className="spinner-blade" />
-        <div className="spinner-blade" />
-        <div className="spinner-blade" />
-        <div className="spinner-blade" />
+    <div
+      role="button"
+      aria-label="Show logs"
+      style={{ ...toggleStyle, cursor: 'pointer' }}
+    >
+      <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ width: 20, height: 20 }}>
+          <StyledWrapper>
+            <div className="spinner center">
+              <div className="spinner-blade" />
+              <div className="spinner-blade" />
+              <div className="spinner-blade" />
+              <div className="spinner-blade" />
+              <div className="spinner-blade" />
+              <div className="spinner-blade" />
+              <div className="spinner-blade" />
+              <div className="spinner-blade" />
+              <div className="spinner-blade" />
+              <div className="spinner-blade" />
+              <div className="spinner-blade" />
+              <div className="spinner-blade" />
+            </div>
+          </StyledWrapper>
+        </div>
       </div>
-    </StyledWrapper>
+    </div>
+
   );
 }
 

@@ -1,4 +1,4 @@
-import CloneLoader from "@/components/CloneLoader";
+import Annotator from "@/components/Annotator";
 import { getWebsiteBySlug, loadAnnotationsForPage } from "@/utils/api.server";
 import { normalizeUrl, appPathToPageUrl } from "@/utils/url";
 import { notFound } from "next/navigation";
@@ -28,12 +28,7 @@ export async function generateMetadata({
   const search = buildSearch(await searchParams);
 
   const website = await getWebsiteBySlug(site);
-  if (!website) return { title: "Not Found" };
-
-  // Don't call getClonedPage here — it causes Next.js/vinext to hoist every
-  // <link> element from the cloned HTML into the RSC stream as resource hints,
-  // producing "<link rel=preload> must have a valid `as` value" warnings.
-  // CloneLoader will update document.title once it loads client-side.
+  if (!website) return { title: "Not Found 2" };
   const url = normalizeUrl(appPathToPageUrl(website.origin, path, search));
   const hostname = new URL(url).hostname.replace(/^www\./, '');
   return { title: `Annotating ${hostname}` };
@@ -60,6 +55,14 @@ export default async function SitePage({
   const frameUrl = `/_frame/${site}${framePathname ? '/' + framePathname : ''}${search}`;
 
   const annotations = await loadAnnotationsForPage(url);
+  const title = "Annotated page"
 
-  return <CloneLoader frameUrl={frameUrl} pageUrl={url} annotations={annotations} />;
+  return (
+    <Annotator
+      annotations={annotations}
+      title={title}
+      pageUrl={url}
+      iframeUrl={frameUrl}
+    />
+  )
 }

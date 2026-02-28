@@ -1,45 +1,26 @@
 "use client";
 
 import { useRef, useCallback, useState, useEffect, type RefObject } from 'react';
-import { useClickHref, useRangeMatching } from '../hooks/Annotator.hooks';
-import Logger from './Logger';
+import { useClickHref, useRangeMatching, useIframeTracking } from '../hooks/Annotator.hooks';
 import { AnnotationContext } from '../context/Annotator.context';
 import Sidebar from './Sidebar';
 import MenuOnRange from './MenuOnRange';
 import MenuOnFocus from './MenuOnFocus';
 import PromptBox from './PromptBox';
 import annotationStyles from "../styles/Annotator.styles";
+import Loader from './Loader';
 
 type AnnotatorProps = {
   annotations?: AnnotationItem[];
   title?: string;
-  apiBase: string;
   pageUrl: string;
-  /** When set, renders an <iframe> pointing at this URL (same-origin frame). */
   iframeUrl: string;
 }
 
-export default function Annotator({ annotations, title, apiBase, pageUrl, iframeUrl }: AnnotatorProps) {
+export default function Annotator({ annotations, title, pageUrl, iframeUrl }: AnnotatorProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  // contentRef points to the iframe's body once it's loaded — used by range matching.
-  const contentRef = useRef<HTMLElement | null>(null);
-  const [iframeReady, setIframeReady] = useState(false);
-  // Track the iframe element reactively so AnnotationContext children can offset positions.
-  const [iframeEl, setIframeEl] = useState<HTMLIFrameElement | null>(null);
 
-  // When the iframe finishes loading, point contentRef at its body.
-  useEffect(() => {
-    const iframe = iframeRef.current;
-    if (!iframe) return;
-    const onLoad = () => {
-      contentRef.current = iframe.contentDocument?.body ?? null;
-      setIframeEl(iframe);
-      setIframeReady(false);       // reset to let useRangeMatching re-run
-      requestAnimationFrame(() => setIframeReady(true));
-    };
-    iframe.addEventListener('load', onLoad);
-    return () => iframe.removeEventListener('load', onLoad);
-  }, [iframeUrl]);
+  const { contentRef, iframeReady, notifyMatchSuccess } = useIframeTracking(iframeRef, pageUrl);
 
   // Forward pointer and selection events from inside the iframe to the parent document
   // so that hooks listening on `document` (MenuOnRange, etc.) receive them.
@@ -87,8 +68,13 @@ export default function Annotator({ annotations, title, apiBase, pageUrl, iframe
   }, [iframeUrl]);
 
   const { rangeResults, allMatched, isMatching, matchedAnnotations } = useRangeMatching(
-    contentRef, annotations, iframeReady, pageUrl, apiBase
+    contentRef, annotations, iframeReady, pageUrl
   );
+
+  // Write back the observed script count the first time matching fully succeeds.
+  useEffect(() => {
+    if (allMatched) notifyMatchSuccess(title);
+  }, [allMatched, notifyMatchSuccess, title]);
 
   const [pendingHref, setPendingHref] = useState<string | null>(null);
   const closeModal = useCallback(() => setPendingHref(null), []);
@@ -121,7 +107,6 @@ export default function Annotator({ annotations, title, apiBase, pageUrl, iframe
         contentReady={iframeReady}
         pageUrl={pageUrl}
         contentRef={contentRef}
-        iframeEl={iframeEl}
       >
         <Sidebar />
         <MenuOnRange />
@@ -146,8 +131,7 @@ export default function Annotator({ annotations, title, apiBase, pageUrl, iframe
       )}
 
       {(!allMatched && !isMatching) && (
-        <Logger info={{ totalTime: 0, error: null, rangeResults, success: iframeReady, title, numberOfScripts: 0, executedScripts: 0 }} />
-      )}
+        <Loader />)}
     </>
   );
 }

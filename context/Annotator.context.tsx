@@ -12,13 +12,13 @@ type AnnotationContextProps = {
   title?: string;
   contentReady?: boolean;
   contentRef: React.RefObject<HTMLElement | null>;
-  /** The <iframe> element, when content is rendered inside one. */
-  iframeEl?: HTMLIFrameElement | null;
+  /** Ref to the <iframe> element, when content is rendered inside one. */
+  iframeRef?: React.RefObject<HTMLIFrameElement | null>;
 };
 
 type AnnotationContextType = {
   contentRef: React.RefObject<HTMLElement | null>;
-  iframeEl?: HTMLIFrameElement | null;
+  iframeRef?: React.RefObject<HTMLIFrameElement | null>;
   annotations: AnnotationItem[];
   pageUrl?: string;
   title?: string;
@@ -53,7 +53,7 @@ export function AnnotationContext({
   title,
   contentRef,
   contentReady,
-  iframeEl,
+  iframeRef,
 }: AnnotationContextProps) {
   const [annotations, setAnnotations] = useState<AnnotationItem[]>(initialAnnotations);
   const [currentHighlightColor, setCurrentHighlightColor] = useState<string>("#87ceeb");
@@ -182,7 +182,7 @@ export function AnnotationContext({
 
   const value = {
     contentRef,
-    iframeEl,
+    iframeRef,
     annotations,
     pageUrl,
     title,
