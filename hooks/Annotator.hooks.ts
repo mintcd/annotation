@@ -68,7 +68,7 @@ export function useRangeMatching(
     // Check if we should skip this matching run
     const currentAnnotationIds = annotations.map(a => a.id).sort();
     const lastAnnotationIds = lastProcessedRef.current.annotationIds;
-    const sameAnnotations = currentAnnotationIds.length === lastAnnotationIds.length && 
+    const sameAnnotations = currentAnnotationIds.length === lastAnnotationIds.length &&
       currentAnnotationIds.every((id, idx) => id === lastAnnotationIds[idx]);
 
     // Skip if we've already processed these exact annotations when ready was true
@@ -82,7 +82,7 @@ export function useRangeMatching(
     // clear previous timers when rerunning
     timersRef.current.forEach(t => clearTimeout(t));
     timersRef.current = [];
-    
+
     // Only clear data for annotations that are no longer in the list
     const currentIds = new Set(currentAnnotationIds);
     setRenderedHtmlMap(prev => {
@@ -94,11 +94,11 @@ export function useRangeMatching(
       }
       return filtered;
     });
-    
+
     // Only keep results for current annotations
     setRangeResults(prev => {
       const filtered = prev.filter(r => currentIds.has(r.id));
-      
+
       // For annotations that are already matched but don't have results yet, add them
       const existingResultIds = new Set(filtered.map(r => r.id));
       const alreadyMatchedWithoutResults = annotations
@@ -109,13 +109,13 @@ export function useRangeMatching(
           success: true,
           message: 'Already matched'
         }));
-      
+
       return [...filtered, ...alreadyMatchedWithoutResults];
     });
 
     // Only match annotations that haven't been successfully matched yet
     const annotationsToMatch = annotations.filter(a => !matchedAnnotationIdsRef.current.has(a.id));
-    
+
     if (annotationsToMatch.length === 0) {
       // All annotations already matched
       setIsMatching(false);
@@ -565,56 +565,208 @@ export function useScriptLoader(
       } catch { }
     };
 
+    // Injected as the very first script, before any cloned scripts run.
+    // Patches all the common ways JS can load root-relative resources so that
+    //   /some/path  →  /_proxy/{slug}/some/path
+    // The slug is always the first segment of window.location.pathname.
+    const ROOT_RELATIVE_INTERCEPTOR = `(function(){
+      if(window.__proxyRootRewritePatched)return;
+      window.__proxyRootRewritePatched=true;
+      var slug=window.location.pathname.split('/').filter(Boolean)[0];
+      if(!slug)return;
+      var base='/_proxy/'+slug;
+      function rw(u){
+        if(!u||typeof u!=='string')return u;
+        if(u.startsWith('/')&&!u.startsWith('//')&&!u.startsWith('/_proxy/')&&!u.startsWith('/_next/')&&!u.startsWith('/api/'))
+          return base+u;
+        return u;
+      }
+      // Blocked third-party domains — scripts from these hosts require their
+      // own origin / HTTPS and will always fail or error in our proxy context.
+      var BLOCKED=['googletagmanager.com','google-analytics.com','hotjar.com',
+        'static.hotjar.com','script.hotjar.com','doubleclick.net',
+        'googlesyndication.com','connect.facebook.net','cdn.cookielaw.org',
+        'onetrust.com','cookiebot.com'];
+      function isBlocked(u){
+        try{var h=new NativeURL(u).hostname;return BLOCKED.some(function(d){return h===d||h.endsWith('.'+d);});}catch(e){return false;}
+      }
+      // HTMLScriptElement.src — rewrite root-relative AND block tracker domains
+      var sDesc=Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype,'src');
+      Object.defineProperty(HTMLScriptElement.prototype,'src',{get:sDesc.get,set:function(v){
+        if(typeof v==='string'&&isBlocked(v)){this.type='javascript/blocked';return;}
+        sDesc.set.call(this,rw(v));
+      },configurable:true});
+      // HTMLLinkElement.href (stylesheet dynamic loading)
+      var lDesc=Object.getOwnPropertyDescriptor(HTMLLinkElement.prototype,'href');
+      if(lDesc&&lDesc.set)Object.defineProperty(HTMLLinkElement.prototype,'href',{get:lDesc.get,set:function(v){lDesc.set.call(this,rw(v));},configurable:true});
+      // HTMLImageElement.src
+      var iDesc=Object.getOwnPropertyDescriptor(HTMLImageElement.prototype,'src');
+      if(iDesc&&iDesc.set)Object.defineProperty(HTMLImageElement.prototype,'src',{get:iDesc.get,set:function(v){iDesc.set.call(this,rw(v));},configurable:true});
+      // Element.setAttribute
+      var origSetAttr=Element.prototype.setAttribute;
+      Element.prototype.setAttribute=function(n,v){
+        if(n==='src'&&typeof v==='string'){
+          if(isBlocked(v)){this.type='javascript/blocked';return;}
+          return origSetAttr.call(this,n,rw(v));
+        }
+        if(n==='href'&&typeof v==='string')return origSetAttr.call(this,n,rw(v));
+        return origSetAttr.call(this,n,v);
+      };
+      // fetch
+      var origFetch=window.fetch;
+      window.fetch=function(input,init){
+        if(typeof input==='string')input=rw(input);
+        else if(input instanceof Request){var u=rw(input.url);if(u!==input.url)input=new Request(u,input);}
+        return origFetch.call(this,input,init);
+      };
+      // XMLHttpRequest.open
+      var origOpen=XMLHttpRequest.prototype.open;
+      XMLHttpRequest.prototype.open=function(method,url){
+        if(typeof url==='string')url=rw(url);
+        return origOpen.apply(this,[method,url].concat(Array.prototype.slice.call(arguments,2)));
+      };
+      // new URL(path) when path is root-relative and no explicit base given —
+      // intercept via URL constructor replacement
+      var NativeURL=window.URL;
+      try{
+        window.URL=function URL(u,base){
+          if(!base&&typeof u==='string')u=rw(u);
+          return new NativeURL(u,base||window.location.href);
+        };
+        window.URL.prototype=NativeURL.prototype;
+        window.URL.createObjectURL=NativeURL.createObjectURL.bind(NativeURL);
+        window.URL.revokeObjectURL=NativeURL.revokeObjectURL.bind(NativeURL);
+      }catch(e){}
+    })();`;
+
+    const JQUERY_READY_INTERCEPTOR = `(function(){
+      var jq=window.jQuery||window.$;
+      if(!jq||window.__proxyReadyPatched)return;
+      window.__proxyReadyPatched=true;
+      var q=[];
+      var _orig=jq.fn.ready;
+      jq.fn.ready=function(fn){q.push(fn);return this;};
+      var origJQ=window.jQuery;
+      if(origJQ){
+        var w=function(sel){if(typeof sel==='function'){q.push(sel);return origJQ(document);}return origJQ.apply(this,arguments);};
+        Object.assign(w,origJQ);w.fn=origJQ.fn;w.prototype=origJQ.prototype;
+        window.jQuery=window.$=w;
+      }
+      window.__flushProxyReady=function(){
+        if(origJQ){origJQ.fn.ready=_orig;window.jQuery=window.$=origJQ;}
+        q.forEach(function(fn){try{fn(window.jQuery);}catch(e){console.warn('[proxy] ready-cb',e);}});
+      };
+    })();`;
+
+    // Flush a batch of external scripts: register listeners first (so we
+    // never miss a cache-hit 'load' event), then append them all at once.
+    // With async=false the browser fetches concurrently but runs them in
+    // insertion order, just like the parser does for normal <script> elements.
+    const flushExternalBatch = async (
+      batch: { el: HTMLScriptElement; signalKey: string }[],
+      parent: HTMLElement
+    ) => {
+      if (batch.length === 0) return;
+      const promises = batch.map(({ el }) => waitForLoadOrError(el));
+      for (const { el } of batch) {
+        el.async = false;
+        parent.appendChild(el);
+        executedScripts.current.push(el);
+      }
+      await Promise.all(promises);
+    };
+
     const injectScripts = async () => {
       try {
         await sleep(50);
+        if (cancelled) return;
 
-        const container = document.querySelector('.cloned-content') as HTMLElement | null;
+        const parent = document.head || document.body;
+        let jqueryPatched = false;
+
+        // Inject the root-relative URL rewriter first so that any runtime
+        // loadScript('/root/path') call goes through /_proxy/{slug}/root/path
+        // regardless of which script issues it.
+        const interceptorEl = document.createElement('script');
+        interceptorEl.text = ROOT_RELATIVE_INTERCEPTOR;
+        parent.appendChild(interceptorEl);
+        executedScripts.current.push(interceptorEl);
+
+        // Process scripts in document order.
+        // External scripts are batched together so the browser fetches them
+        // concurrently but executes them in order (async=false).
+        // When an inline script is encountered we first drain the external
+        // batch (waiting for every load), guaranteeing every global the
+        // inline script depends on is already defined.
+        let externalBatch: { el: HTMLScriptElement; signalKey: string }[] = [];
 
         for (let i = 0; i < scripts.length; i++) {
           if (cancelled) return;
           const s = scripts[i];
-          const scriptEl = document.createElement('script');
-          if (s.type) scriptEl.type = s.type;
-          if (s.async) scriptEl.async = true;
-          if (s.defer) scriptEl.defer = true;
 
           if (s.src) {
-            scriptEl.src = s.src;
-            // Append to container if available, otherwise to head
-            const parent = container || document.head || document.body;
-            parent.appendChild(scriptEl);
-            executedScripts.current.push(scriptEl);
-            await waitForLoadOrError(scriptEl);
+            // ── External script: accumulate into the current batch ──────
+            const el = document.createElement('script');
+            if (s.type) el.type = s.type;
+            if (s.defer) el.defer = true;
+            el.src = s.src;
+            externalBatch.push({ el, signalKey: s.id || s.src });
 
-            // Signal execution for external scripts (use canonical id if available)
-            pushProxySignal(s.id || s.src || '');
           } else if (s.content) {
-            // Inline content
-            scriptEl.text = s.content;
-            const parent = container || document.body;
-            parent.appendChild(scriptEl);
-            executedScripts.current.push(scriptEl);
+            // ── Inline script: drain pending externals first ────────────
+            await flushExternalBatch(externalBatch, parent);
+            for (const { signalKey } of externalBatch) pushProxySignal(signalKey);
 
-            // Inline scripts execute immediately; signal execution (use canonical id if available)
-            pushProxySignal(s.id || (pageUrl ? `${pageUrl}#inline-${i}` : `inline-${i}`));
+            // After externals land, patch jQuery ready-queue if available
+            if (!jqueryPatched && (window as any).jQuery) {
+              jqueryPatched = true;
+              const patch = document.createElement('script');
+              patch.text = JQUERY_READY_INTERCEPTOR;
+              parent.appendChild(patch);
+              executedScripts.current.push(patch);
+            }
+
+            externalBatch = [];
+
+            // Now append the inline script — all its dependencies are ready.
+            const el = document.createElement('script');
+            if (s.type) el.type = s.type;
+            el.text = s.content;
+            parent.appendChild(el);
+            executedScripts.current.push(el);
+            pushProxySignal(s.id || `${pageUrl ?? ''}#inline-${i}`);
           }
-
-          // small pause to avoid blocking
-          await sleep(10);
         }
 
-        // Still include site-specific injection as a fallback
-        if (pageUrl && pageUrl.includes('link.springer.com')) {
-          const mathjaxUrl = 'cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-mml-chtml.js';
-          const src = apiBase ? `${apiBase}/proxy/${mathjaxUrl}` : mathjaxUrl;
+        // Drain any trailing external scripts.
+        await flushExternalBatch(externalBatch, parent);
+        for (const { signalKey } of externalBatch) pushProxySignal(signalKey);
 
-          const mathjaxScript = document.createElement('script');
-          mathjaxScript.src = src;
-          mathjaxScript.type = 'text/javascript';
-          document.head.appendChild(mathjaxScript);
-          executedScripts.current.push(mathjaxScript);
-          await waitForLoadOrError(mathjaxScript);
+        // If jQuery appeared in a trailing external batch, patch it now.
+        if (!jqueryPatched && (window as any).jQuery) {
+          jqueryPatched = true;
+          const patch = document.createElement('script');
+          patch.text = JQUERY_READY_INTERCEPTOR;
+          parent.appendChild(patch);
+          executedScripts.current.push(patch);
+        }
+
+        // Flush all queued $(document).ready() callbacks — every global
+        // that any callback could need is now defined.
+        if (jqueryPatched && (window as any).__flushProxyReady) {
+          try { (window as any).__flushProxyReady(); } catch { }
+        }
+
+        // Springer: load MathJax directly from CDN.
+        if (pageUrl && pageUrl.includes('link.springer.com')) {
+          const src = 'https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-mml-chtml.js';
+          const mjEl = document.createElement('script');
+          mjEl.src = src;
+          const mjPromise = waitForLoadOrError(mjEl);
+          mjEl.async = false;
+          parent.appendChild(mjEl);
+          executedScripts.current.push(mjEl);
+          await mjPromise;
           pushProxySignal(src);
         }
       } catch (error) {

@@ -2,6 +2,8 @@
 import { cache } from 'react';
 import * as cheerio from 'cheerio';
 import * as css from 'css';
+import { originToSlug } from './url';
+import { getOrCreateWebsite } from './database';
 
 export type ClonedPage = {
   title: string;
@@ -37,15 +39,7 @@ function absoluteUrl(base: string, relative: string): string {
   }
 }
 
-function proxiedUrl(targetUrl: string): string {
-  try {
-    const u = new URL(targetUrl);
-    const proto = (u.protocol === 'http:' || u.protocol === 'https:') ? u.protocol.replace(':', '') + '/' : '';
-    return `/proxy/${proto}${u.host}${u.pathname}${u.search}${u.hash}`;
-  } catch (e) {
-    return targetUrl;
-  }
-}
+
 
 function isJsonOnly(text: string): boolean {
   const trimmed = text.trim();
@@ -79,41 +73,26 @@ function injectSignalSnippet(text: string, url: string, signalId?: string, scrip
   return `${text}\n${signalSnippet}`;
 }
 
-function rewriteCss(cssText: string, cssUrl: string) {
-  const cssUrlObj = new URL(cssUrl);
-
+function rewriteCss(cssText: string, cssUrl: string, proxiedUrl: (url: string) => string) {
   cssText = cssText.replace(/url\((['"]?)([^'"\)]+)\1\)/g, (match, quote, url) => {
     if (url.startsWith('http') || url.startsWith('data:') || url.startsWith('blob:')) return match;
-    const resolvedUrl = new URL(url, cssUrl);
-    const rewrittenUrl = proxiedUrl(resolvedUrl.href);
-    return `url(${quote}${rewrittenUrl}${quote})`;
+    try {
+      return `url(${quote}${proxiedUrl(new URL(url, cssUrl).href)}${quote})`;
+    } catch { return match; }
   });
 
   cssText = cssText.replace(/@import\s+url\((['"]?)([^'"\)]+)\1\)/g, (match, quote, url) => {
     if (url.startsWith('http') || url.startsWith('data:') || url.startsWith('blob:')) return match;
     try {
-      const resolvedUrl = new URL(url, cssUrl);
-      const rewrittenUrl = proxiedUrl(resolvedUrl.href);
-      return `@import url(${quote}${rewrittenUrl}${quote})`;
-    } catch {
-      const proxyBase = `/proxy/${cssUrlObj.host}`;
-      const fullUrl = url.startsWith('/') ? `${proxyBase}${url}` : `${proxyBase}/${url}`;
-      return `@import url(${quote}${fullUrl}${quote})`;
-    }
+      return `@import url(${quote}${proxiedUrl(new URL(url, cssUrl).href)}${quote})`;
+    } catch { return match; }
   });
 
   cssText = cssText.replace(/@import\s+(['"])([^'";\)]+)\1\s*;/g, (match, quote, url) => {
     if (url.startsWith('http') || url.startsWith('data:') || url.startsWith('blob:')) return match;
     try {
-      const resolvedUrl = new URL(url, cssUrl);
-      const rewrittenUrl = proxiedUrl(resolvedUrl.href);
-      return `@import url(${quote}${rewrittenUrl}${quote})`;
-    } catch {
-      const cssUrlObj = new URL(cssUrl);
-      const proxyBase = `/proxy/${cssUrlObj.host}`;
-      const fullUrl = url.startsWith('/') ? `${proxyBase}${url}` : `${proxyBase}/${url}`;
-      return `@import url(${quote}${fullUrl}${quote})`;
-    }
+      return `@import url(${quote}${proxiedUrl(new URL(url, cssUrl).href)}${quote})`;
+    } catch { return match; }
   });
 
   return cssText;
@@ -136,8 +115,74 @@ export const getClonedPage = cache(async (url: string): Promise<ClonedPage> => {
   const baseTagHref = $('base[href]').attr('href');
   const clonedBase = (baseTagHref ? new URL(baseTagHref, pageUrl) : new URL('.', pageUrl)).href;
 
-  // Remove cookie/consent banners
+  // ── Origin registration ───────────────────────────────────────────────────
+  // Collect every unique origin referenced by resources in this page, register
+  // them in the websites table so the _proxy route can resolve slug → origin.
+  const resourceOrigins = new Set<string>([pageUrl.origin]);
+  $('[src],[href]').each((_, el) => {
+    const raw = ($(el).attr('src') || $(el).attr('href') || '').trim();
+    if (!raw || isSkippable(raw)) return;
+    try { resourceOrigins.add(new URL(absoluteUrl(clonedBase, raw)).origin); } catch { /* ignore */ }
+  });
+
+  const slugMap = new Map<string, string>();
+  await Promise.all(
+    [...resourceOrigins].map(async (origin) => {
+      try {
+        const website = await getOrCreateWebsite(origin);
+        slugMap.set(origin, website.id);
+      } catch {
+        // Fallback: deterministic slug (correct unless there was a DB collision)
+        slugMap.set(origin, originToSlug(origin));
+      }
+    })
+  );
+
+  // Slug-aware proxy URL builder — used everywhere below.
+  // Assets go to /_proxy/{slug}{pathname} so they never collide with the
+  // [site]/[[...path]] page route. No middleware needed.
+  function proxiedUrl(targetUrl: string): string {
+    try {
+      const u = new URL(targetUrl);
+      const slug = slugMap.get(u.origin) ?? originToSlug(u.origin);
+      return `/_proxy/${slug}${u.pathname}${u.search}${u.hash}`;
+    } catch {
+      return targetUrl;
+    }
+  }
+
+  // Remove cookie/consent banners and unneeded link hints
   $('[class*="cookie"], [id*="cookie"], [class*="consent"], [id*="consent"], [class*="gdpr"], [id*="gdpr"]').remove();
+
+  // Handle resource hint links carefully:
+  //
+  //  rel="preload" as="style"  → many sites use this as an async-CSS loader:
+  //    <link rel="preload" as="style" onload="this.rel='stylesheet'" href="…">
+  //    We strip the hint attributes and promote it to a real stylesheet so
+  //    the CSS actually applies.  The href gets proxied in the stylesheet loop.
+  //
+  //  rel="preload" as="font"   → keep with proxied href so fonts load.
+  //
+  //  rel="preload" (no/invalid as)  → strip; React warns about these.
+  //
+  //  prefetch / preconnect / dns-prefetch / modulepreload
+  //    → strip; they are pure performance hints with no effect in a clone.
+  $('link[rel~="preload"]').each((_, el) => {
+    const asVal = ($(el).attr('as') || '').toLowerCase();
+    const href = $(el).attr('href');
+    if (asVal === 'style' && href) {
+      // Promote to stylesheet — the stylesheet loop below will proxy the href.
+      $(el).attr('rel', 'stylesheet');
+      $(el).removeAttr('as');
+      $(el).removeAttr('onload');
+      $(el).removeAttr('onerror');
+    } else if (asVal === 'font' && href) {
+      try { $(el).attr('href', proxiedUrl(absoluteUrl(clonedBase, href))); } catch { }
+    } else {
+      $(el).remove();
+    }
+  });
+  $('link[rel~="prefetch"], link[rel~="modulepreload"], link[rel~="preconnect"], link[rel~="dns-prefetch"]').remove();
 
   // Rewrite anchors
   $('a[href]').each((_, el) => {
@@ -172,6 +217,36 @@ export const getClonedPage = cache(async (url: string): Promise<ClonedPage> => {
   // Extract scripts into a serializable array so the client can inject them
   const scripts: Array<{ id?: string; src?: string; content?: string; type?: string; async?: boolean; defer?: boolean; location?: 'head' | 'body' }> = [];
 
+  // Domains whose scripts make back-channel authenticated API calls that
+  // always fail through a proxy (cookie consent SDKs, tag managers, etc.).
+  const BLOCKED_SCRIPT_DOMAINS = [
+    // Cookie / consent SDKs
+    'cdn.cookielaw.org',
+    'cdn.onetrust.com',
+    'onetrust.com',
+    'cookiebot.com',
+    'usercentrics.eu',
+    'trustarc.com',
+    'cookiepro.com',
+    'consent.cookiefirst.com',
+    // Tag managers & analytics (require own domain + HTTPS)
+    'googletagmanager.com',
+    'google-analytics.com',
+    'analytics.google.com',
+    'hotjar.com',
+    'static.hotjar.com',
+    'script.hotjar.com',
+    // Ad / tracking pixels
+    'doubleclick.net',
+    'googlesyndication.com',
+    'adservice.google.com',
+    'connect.facebook.net',
+    'sc-static.net',
+  ];
+  function isBlockedScript(src: string): boolean {
+    try { return BLOCKED_SCRIPT_DOMAINS.some(d => new URL(src).hostname.endsWith(d)); } catch { return false; }
+  }
+
   // Process head scripts first and remove them
   $('head script').each((_, el) => {
     const script = $(el);
@@ -183,25 +258,26 @@ export const getClonedPage = cache(async (url: string): Promise<ClonedPage> => {
 
     if (src) {
       const abs = absoluteUrl(clonedBase, src);
+      if (isBlockedScript(abs)) { script.remove(); return; }
       const proxied = proxiedUrl(abs);
       const scriptId = `${url}#script-${scripts.length}`;
       scripts.push({ id: scriptId, src: proxied, type, async, defer, location: 'head' });
     } else if (content) {
       let rewrittenContent = content;
       rewrittenContent = rewrittenContent.replace(/(?:[\"']?)src(?:[\"']?)\s*:\s*("|')(.*?)\1/g, (m: any, q: any, u: any) => {
-        if (!u || u.startsWith('http') || u.startsWith('//') || isSkippable(u) || u.includes('/proxy/')) return m;
+        if (!u || u.startsWith('http') || u.startsWith('//') || isSkippable(u) || u.includes('/_proxy/')) return m;
         return `src: ${q}${proxiedUrl(absoluteUrl(clonedBase, u))}${q}`;
       });
       rewrittenContent = rewrittenContent.replace(/\.src\s*=\s*("|')(.*?)\1/g, (m: any, q: any, u: any) => {
-        if (!u || u.startsWith('http') || u.startsWith('//') || isSkippable(u) || u.includes('/proxy/')) return m;
+        if (!u || u.startsWith('http') || u.startsWith('//') || isSkippable(u) || u.includes('/_proxy/')) return m;
         return m.replace(u, proxiedUrl(absoluteUrl(clonedBase, u)));
       });
       rewrittenContent = rewrittenContent.replace(/setAttribute\(\s*("|')src\1\s*,\s*("|')(.*?)\2\s*\)/g, (m: any, _q1: any, q2: any, u: any) => {
-        if (!u || u.startsWith('http') || u.startsWith('//') || isSkippable(u) || u.includes('/proxy/')) return m;
+        if (!u || u.startsWith('http') || u.startsWith('//') || isSkippable(u) || u.includes('/_proxy/')) return m;
         return m.replace(u, proxiedUrl(absoluteUrl(clonedBase, u)));
       });
       rewrittenContent = rewrittenContent.replace(/(\w+)\s*:\s*['"](\/[^'\"]*)['"]/g, (m: any, prop: any, u: any) => {
-        if (prop === 'src' && !u.startsWith('http') && !u.startsWith('//') && !isSkippable(u) && !u.includes('/proxy/')) {
+        if (prop === 'src' && !u.startsWith('http') && !u.startsWith('//') && !isSkippable(u) && !u.includes('/_proxy/')) {
           return `${prop}: '${proxiedUrl(absoluteUrl(clonedBase, u))}'`;
         }
         return m;
@@ -224,25 +300,26 @@ export const getClonedPage = cache(async (url: string): Promise<ClonedPage> => {
 
     if (src) {
       const abs = absoluteUrl(clonedBase, src);
+      if (isBlockedScript(abs)) { script.remove(); return; }
       const proxied = proxiedUrl(abs);
       const scriptId = `${url}#script-${scripts.length}`;
       scripts.push({ id: scriptId, src: proxied, type, async, defer, location: 'body' });
     } else if (content) {
       let rewrittenContent = content;
       rewrittenContent = rewrittenContent.replace(/(?:[\"']?)src(?:[\"']?)\s*:\s*("|')(.*?)\1/g, (m: any, q: any, u: any) => {
-        if (!u || u.startsWith('http') || u.startsWith('//') || isSkippable(u) || u.includes('/proxy/')) return m;
+        if (!u || u.startsWith('http') || u.startsWith('//') || isSkippable(u) || u.includes('/_proxy/')) return m;
         return `src: ${q}${proxiedUrl(absoluteUrl(clonedBase, u))}${q}`;
       });
       rewrittenContent = rewrittenContent.replace(/\.src\s*=\s*("|')(.*?)\1/g, (m: any, q: any, u: any) => {
-        if (!u || u.startsWith('http') || u.startsWith('//') || isSkippable(u) || u.includes('/proxy/')) return m;
+        if (!u || u.startsWith('http') || u.startsWith('//') || isSkippable(u) || u.includes('/_proxy/')) return m;
         return m.replace(u, proxiedUrl(absoluteUrl(clonedBase, u)));
       });
       rewrittenContent = rewrittenContent.replace(/setAttribute\(\s*("|')src\1\s*,\s*("|')(.*?)\2\s*\)/g, (m: any, _q1: any, q2: any, u: any) => {
-        if (!u || u.startsWith('http') || u.startsWith('//') || isSkippable(u) || u.includes('/proxy/')) return m;
+        if (!u || u.startsWith('http') || u.startsWith('//') || isSkippable(u) || u.includes('/_proxy/')) return m;
         return m.replace(u, proxiedUrl(absoluteUrl(clonedBase, u)));
       });
       rewrittenContent = rewrittenContent.replace(/(\w+)\s*:\s*['"](\/[^'\"]*)['"]/g, (m: any, prop: any, u: any) => {
-        if (prop === 'src' && !u.startsWith('http') && !u.startsWith('//') && !isSkippable(u) && !u.includes('/proxy/')) {
+        if (prop === 'src' && !u.startsWith('http') && !u.startsWith('//') && !isSkippable(u) && !u.includes('/_proxy/')) {
           return `${prop}: '${proxiedUrl(absoluteUrl(clonedBase, u))}'`;
         }
         return m;
@@ -279,7 +356,7 @@ export const getClonedPage = cache(async (url: string): Promise<ClonedPage> => {
       styleContent = `.cloned-content { ${styleContent} }`;
     }
     try {
-      styleContent = rewriteCss(styleContent, clonedBase);
+      styleContent = rewriteCss(styleContent, clonedBase, proxiedUrl);
     } catch { }
     headStyles.push(`<style>${styleContent}</style>`);
   }).remove();
@@ -307,7 +384,7 @@ export const getClonedPage = cache(async (url: string): Promise<ClonedPage> => {
   $('body style').each((_: any, el: any) => {
     try {
       let styleContent = $(el).html() || '';
-      try { styleContent = rewriteCss(styleContent, clonedBase); } catch { }
+      try { styleContent = rewriteCss(styleContent, clonedBase, proxiedUrl); } catch { }
       try {
         const parsed = css.parse(styleContent);
         if (parsed.stylesheet) {
@@ -327,6 +404,36 @@ export const getClonedPage = cache(async (url: string): Promise<ClonedPage> => {
       }
       $(el).text(styleContent);
     } catch { }
+  });
+
+  // Apply the same <link> handling to any remaining body-level link elements.
+  // React 19 hoists ALL <link> elements it finds inside dangerouslySetInnerHTML
+  // to <head>, so any <link rel="preload"> without a valid `as` value triggers a
+  // warning even if it was originally in the body, not the head.
+  $('body link[rel~="preload"]').each((_, el) => {
+    const asVal = ($(el).attr('as') || '').toLowerCase();
+    const href = $(el).attr('href');
+    if (asVal === 'style' && href) {
+      try { $(el).attr('href', proxiedUrl(absoluteUrl(clonedBase, href))); } catch { }
+      $(el).attr('rel', 'stylesheet');
+      $(el).removeAttr('as');
+      $(el).removeAttr('onload');
+      $(el).removeAttr('onerror');
+    } else if (asVal === 'font' && href) {
+      try { $(el).attr('href', proxiedUrl(absoluteUrl(clonedBase, href))); } catch { }
+    } else {
+      $(el).remove();
+    }
+  });
+  // Strip all remaining body hint/resource links — they are either redundant
+  // (already handled above) or would cause React 19 hoisting warnings.
+  $('body link[rel~="prefetch"], body link[rel~="modulepreload"], body link[rel~="preconnect"], body link[rel~="dns-prefetch"]').remove();
+  // Promote any body stylesheet links (non-standard but some sites do it).
+  $('body link[rel="stylesheet"]').each((_: any, el: any) => {
+    const href = $(el).attr('href');
+    if (href) {
+      try { $(el).attr('href', proxiedUrl(absoluteUrl(clonedBase, href))); } catch { }
+    }
   });
 
   const body = $('body').html() || '';

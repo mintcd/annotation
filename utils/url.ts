@@ -78,3 +78,55 @@ export function normalizeUrl(url: string): string {
     return url; // fallback for invalid URLs
   }
 };
+
+// ─── Site-slug helpers ───────────────────────────────────────────────────────
+
+/**
+ * Convert an origin to a URL-friendly slug stored in the `websites` table.
+ *   "https://plato.stanford.edu" → "plato-stanford-edu"
+ *   "https://www.cambridge.org"  → "cambridge-org"
+ *   "https://en.wikipedia.org"   → "en-wikipedia-org"
+ *
+ * www. is stripped so the slug stays short and recognisable.
+ * Slug uniqueness is enforced by the database (see /api/websites).
+ */
+export function originToSlug(origin: string): string {
+  try {
+    const host = new URL(origin).hostname.toLowerCase().replace(/^www\./, '');
+    return host.replace(/\./g, '-');
+  } catch {
+    return origin
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+  }
+}
+
+/**
+ * Build the app-internal path for a full page URL given its site slug.
+ *   ("https://plato.stanford.edu/entries/axiom-choice/", "plato-stanford-edu")
+ *   → "/plato-stanford-edu/entries/axiom-choice/"
+ */
+export function pageUrlToAppPath(pageUrl: string, slug: string): string {
+  try {
+    const u = new URL(pageUrl);
+    return `/${slug}${u.pathname}${u.search}${u.hash}`;
+  } catch {
+    return `/${slug}`;
+  }
+}
+
+/**
+ * Reconstruct the original page URL from its component parts.
+ *   ("https://plato.stanford.edu", ["entries", "axiom-choice"], "?section=3")
+ *   → "https://plato.stanford.edu/entries/axiom-choice?section=3"
+ */
+export function appPathToPageUrl(
+  origin: string,
+  pathSegments: string[] | undefined,
+  search: string,
+): string {
+  const path = pathSegments?.length ? '/' + pathSegments.join('/') : '/';
+  return `${origin}${path}${search}`;
+}

@@ -169,3 +169,50 @@ export async function getAnnotationHtml(id: string): Promise<string> {
   return await response.text();
 }
 
+
+// ===== Websites API =====
+
+export interface Website {
+  /** Slug derived from hostname, e.g. "plato-stanford-edu" */
+  id: string;
+  /** Canonical scheme+host, e.g. "https://plato.stanford.edu" */
+  origin: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Return all registered websites. */
+export async function listWebsites(): Promise<Website[]> {
+  const base = getBase();
+  const response = await fetch(`${base}/api/websites`, { cache: 'no-store' });
+  if (!response.ok) throw new Error(`Failed to list websites: ${response.status}`);
+  return response.json();
+}
+
+/** Look up a website by its slug. Returns null when not found. */
+export async function getWebsiteBySlug(slug: string): Promise<Website | null> {
+  const base = getBase();
+  const response = await fetch(
+    `${base}/api/websites?slug=${encodeURIComponent(slug)}`,
+    { cache: 'no-store' },
+  );
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`Failed to get website: ${response.status}`);
+  return response.json();
+}
+
+/**
+ * Look up or create the website entry for the given origin.
+ * The server resolves any slug collisions automatically.
+ */
+export async function getOrCreateWebsite(origin: string): Promise<Website> {
+  const base = getBase();
+  const response = await fetch(`${base}/api/websites`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ origin }),
+    cache: 'no-store',
+  });
+  if (!response.ok) throw new Error(`Failed to get/create website: ${response.status}`);
+  return response.json();
+}

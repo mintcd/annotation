@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from 'framer-motion';
 import { Folder, ChevronDown, ChevronRight } from '../app/icons';
-import Link from "next/link";
 import { useClient, useMobile } from "../hooks";
 import { deletePage as deletePageAPI, deleteAnnotation as deleteAnnotationAPI, updateAnnotation as updateAnnotationAPI } from '../utils/database';
 import PromptBox from './PromptBox';
@@ -25,6 +24,29 @@ interface AnnotationPage {
 }
 
 
+
+/**
+ * Look up (or create) the site slug for the given page URL via /api/websites,
+ * then navigate to the clean path-based URL:
+ *   https://plato.stanford.edu/entries/axiom-choice/
+ *   → /plato-stanford-edu/entries/axiom-choice/
+ */
+async function navigateToPage(rawUrl: string): Promise<void> {
+  try {
+    const u = new URL(rawUrl);
+    const res = await fetch('/api/websites', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ origin: u.origin }),
+    });
+    if (!res.ok) throw new Error('Failed to register website');
+    const website: { id: string } = await res.json();
+    window.location.href = `/${website.id}${u.pathname}${u.search}${u.hash}`;
+  } catch {
+    // Graceful fallback for malformed URLs
+    window.location.href = `/?url=${encodeURIComponent(rawUrl)}`;
+  }
+}
 
 export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState("");
@@ -343,18 +365,13 @@ export default function Dashboard() {
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           const url = (e.currentTarget as HTMLInputElement).value.trim();
-                          if (url) {
-                            window.location.href = `?url=${url}`;
-                          }
+                          if (url) navigateToPage(url);
                         }
                       }}
                     />
                     <button
                       type="button"
-                      onClick={() => {
-                        const url = enterUrl.trim();
-                        if (url) window.location.href = `?url=${url}`;
-                      }}
+                      onClick={() => { const url = enterUrl.trim(); if (url) navigateToPage(url); }}
                       style={styles.annotateButton}
                       onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#1D4ED8'}
                       onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#2563EB'}
@@ -498,18 +515,13 @@ export default function Dashboard() {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     const url = (e.currentTarget as HTMLInputElement).value.trim();
-                    if (url) {
-                      window.location.href = `?url=${url}`;
-                    }
+                    if (url) navigateToPage(url);
                   }
                 }}
               />
               <button
                 type="button"
-                onClick={() => {
-                  const url = enterUrl.trim();
-                  if (url) window.location.href = `?url=${url}`;
-                }}
+                onClick={() => { const url = enterUrl.trim(); if (url) navigateToPage(url); }}
                 style={styles.annotateButton}
                 onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#1D4ED8'}
                 onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#2563EB'}
@@ -662,14 +674,14 @@ export default function Dashboard() {
                 </div>
                 {/* Action buttons - Mobile responsive */}
                 <div style={styles.actionButtons}>
-                  <Link
-                    href={`?url=${displayedUrl}`}
+                  <button
+                    onClick={() => navigateToPage(displayedUrl)}
                     style={styles.viewPageButton}
                     onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#1D4ED8'}
                     onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#2563EB'}
                   >
                     View Page
-                  </Link>
+                  </button>
                   <button
                     onClick={() => deletePage(displayedUrl, displayedPage.filename)}
                     disabled={deletingPages.has(displayedUrl)}
@@ -723,18 +735,13 @@ export default function Dashboard() {
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
                           const url = (e.currentTarget as HTMLInputElement).value.trim();
-                          if (url) {
-                            window.location.href = `?url=${url}`;
-                          }
+                          if (url) navigateToPage(url);
                         }
                       }}
                     />
                     <button
                       type="button"
-                      onClick={() => {
-                        const url = enterUrl.trim();
-                        if (url) window.location.href = `?url=${url}`;
-                      }}
+                      onClick={() => { const url = enterUrl.trim(); if (url) navigateToPage(url); }}
                       style={styles.emptyStateAnnotateButton}
                       onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#1D4ED8'}
                       onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#2563EB'}
