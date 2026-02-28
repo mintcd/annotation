@@ -1,7 +1,6 @@
 import CloneLoader from "@/components/CloneLoader";
-import { loadAnnotationsForPage } from "@/utils/annotations";
+import { getWebsiteBySlug, loadAnnotationsForPage } from "@/utils/api.server";
 import { normalizeUrl, appPathToPageUrl } from "@/utils/url";
-import { getWebsiteBySlug } from "@/utils/database";
 import { notFound } from "next/navigation";
 
 type Params = { site: string; path?: string[] };
@@ -29,7 +28,7 @@ export async function generateMetadata({
   const search = buildSearch(await searchParams);
 
   const website = await getWebsiteBySlug(site);
-  if (!website) return { title: "Not Found" };
+  if (!website) return { title: "Not Found 2" };
 
   // Don't call getClonedPage here — it causes Next.js/vinext to hoist every
   // <link> element from the cloned HTML into the RSC stream as resource hints,

@@ -1,6 +1,6 @@
 import Dashboard from "@/components/Dashboard";
 import { normalizeUrl, pageUrlToAppPath } from "@/utils/url";
-import { getOrCreateWebsite } from "@/utils/database";
+import { getOrCreateWebsite } from "@/utils/api.server";
 import { redirect } from "next/navigation";
 
 export function generateMetadata() {

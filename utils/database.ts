@@ -192,10 +192,8 @@ export async function listWebsites(): Promise<Website[]> {
 /** Look up a website by its slug. Returns null when not found. */
 export async function getWebsiteBySlug(slug: string): Promise<Website | null> {
   const base = getBase();
-  const response = await fetch(
-    `${base}/api/websites?slug=${encodeURIComponent(slug)}`,
-    { cache: 'no-store' },
-  );
+  const url = `${base}/api/websites?slug=${encodeURIComponent(slug)}`;
+  const response = await fetch(url, { cache: 'no-store' });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`Failed to get website: ${response.status}`);
   return response.json();
