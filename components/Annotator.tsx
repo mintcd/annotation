@@ -17,8 +17,9 @@ type AnnotatorProps = {
   iframeUrl: string;
 }
 
-export default function Annotator({ annotations, title, pageUrl, iframeUrl }: AnnotatorProps) {
+export default function Annotator({ annotations, title: titleProp, pageUrl, iframeUrl }: AnnotatorProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [title, setTitle] = useState(titleProp ?? '');
 
   const { contentRef, iframeReady, notifyMatchSuccess } = useIframeTracking(iframeRef, pageUrl);
 
@@ -57,6 +58,9 @@ export default function Annotator({ annotations, title, pageUrl, iframeUrl }: An
     const onLoad = () => {
       (iframe as HTMLIFrameElement & { _fwdCleanup?: () => void })._fwdCleanup?.();
       attach();
+      // Read the title directly from the loaded document
+      const iframeTitle = iframe.contentDocument?.title;
+      if (iframeTitle) setTitle(iframeTitle);
     };
 
     iframe.addEventListener('load', onLoad);

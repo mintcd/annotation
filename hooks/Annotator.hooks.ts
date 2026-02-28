@@ -88,9 +88,6 @@ export function useIframeTracking(
         executedScriptsRef.current = signalCount;
         console.log(`[IframeTracking] scripts done (${signalCount}), waiting for DOM to settle…`);
 
-        // Scripts may kick off async DOM work (e.g. MathJax typesetting,
-        // framework hydration). Wait for a quiet period with no DOM mutations
-        // before declaring ready, so range matching sees the final DOM.
         const DOM_SETTLE_MS = 300; // ms of silence after last mutation → ready
         const DOM_MAX_MS = 5000;   // hard ceiling for settle phase
 
@@ -157,24 +154,16 @@ export function useIframeTracking(
     return () => iframe.removeEventListener('load', onLoad);
   }, [iframeRef, pageUrl]);
 
-  /**
-   * Call this once when range matching succeeds.
-   * Writes the observed script count back to the DB only when the stored
-   * value was 0 (i.e. first visit), so subsequent loads can use early-exit.
-   */
-  // Update the DB every time ranges are successfully matched: keeps the title
-  // and script count up to date across page changes, not just on first visit.
+  // When range matching succeeds, write back the observed script
   const notifyMatchSuccess = useCallback((title?: string) => {
     if (notifyCalledRef.current) return; // already called this session
     notifyCalledRef.current = true;
     const resolvedTitle = title || pageTitleRef.current || '';
-    // Prefer the count we actually observed; fall back to the stored remote
-    // count so we never overwrite a known value with 0.
+
     const scriptCount = executedScriptsRef.current > 0
       ? executedScriptsRef.current
       : (remoteScriptCountRef.current ?? 0);
     createOrUpdatePage(pageUrl, resolvedTitle, scriptCount)
-      .catch(() => { /* best-effort */ });
   }, [pageUrl]);
 
   return { contentRef, iframeReady, notifyMatchSuccess };
@@ -206,8 +195,6 @@ export function useRangeMatching(
       return copy;
     });
   }
-
-
 
   useEffect(() => {
     if (!ready) return;
