@@ -5,26 +5,31 @@ interface ViewportInfo {
   visualWidth: number;
   offsetLeft: number;
   layoutWidth?: number;
+  scale?: number;
 }
 
 const sidebarStyles = {
-  toggleButton: (isMobile: boolean, isIOS: boolean, viewportInfo: ViewportInfo): React.CSSProperties => ({
-    position: 'fixed' as const,
-    zIndex: 9999,
-    boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.1)',
-    backgroundColor: '#F3F4F6',
-    padding: '0.75rem',
-    borderRadius: '9999px',
-    margin: isMobile && isIOS ? 0 : '1rem',
-    width: '30px',
-    height: '30px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backdropFilter: 'blur(4px)',
-    bottom: isMobile && isIOS ? '1rem' : (isMobile ? viewportInfo.layoutHeight - viewportInfo.offsetTop - viewportInfo.visualHeight : 0),
-    right: isMobile ? viewportInfo.layoutWidth! - viewportInfo.offsetLeft - viewportInfo.visualWidth : 0 as number,
-  }),
+  toggleButton: (isMobile: boolean, isIOS: boolean, viewportInfo: ViewportInfo): React.CSSProperties => {
+    const scale = viewportInfo.scale ?? 1;
+    return {
+      position: 'fixed' as const,
+      zIndex: 9999,
+      boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.1)',
+      backgroundColor: '#F3F4F6',
+      padding: '0.75rem',
+      borderRadius: '9999px',
+      margin: '1rem',
+      width: '30px',
+      height: '30px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backdropFilter: 'blur(4px)',
+      bottom: isMobile ? Math.max(0, viewportInfo.layoutHeight - viewportInfo.offsetTop - viewportInfo.visualHeight) : 0,
+      right: isMobile ? Math.max(0, viewportInfo.layoutWidth! - viewportInfo.offsetLeft - viewportInfo.visualWidth) : 0 as number,
+      ...(isMobile && scale !== 1 ? { transform: `scale(${1 / scale})`, transformOrigin: 'bottom right' } : {}),
+    };
+  },
 
   sidebarContainer: (isMobile: boolean, viewportInfo: ViewportInfo, width: number): React.CSSProperties => ({
     position: 'fixed' as const,
