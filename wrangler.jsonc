@@ -29,5 +29,11 @@
       "database_id": "d0b49103-0e2d-472a-8c52-b323f5819d6e",
       "remote": true
     }
-  ]
+  ],
+  "observability": {
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true
+    }
+  }
 }
