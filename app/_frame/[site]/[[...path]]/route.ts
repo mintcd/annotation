@@ -32,9 +32,15 @@ function absoluteUrl(base: string, relative: string): string {
   try { return new URL(relative, base).href; } catch { return relative; }
 }
 
-function proxiedUrl(slug: string, absolute: string): string {
+function proxiedUrl(slug: string, absolute: string, siteOrigin?: string): string {
   try {
     const u = new URL(absolute);
+    // Cross-origin resources (e.g. Google Fonts, CDN assets) cannot be served
+    // correctly via the single-slug proxy because the proxy always resolves the
+    // slug to the main site's origin.  Leave them as absolute URLs so the browser
+    // fetches them directly — most font/CDN services supply the necessary CORS
+    // headers (Access-Control-Allow-Origin: *).
+    if (siteOrigin && u.origin !== siteOrigin) return absolute;
     return `/_proxy/${slug}${u.pathname}${u.search}${u.hash}`;
   } catch { return absolute; }
 }
@@ -148,8 +154,18 @@ export async function GET(
   $('meta[http-equiv="Content-Security-Policy"]').remove();
   $('meta[http-equiv="X-Frame-Options"]').remove();
 
-  // Remove resource hints (React 19 hoists <link> elements from iframes too)
-  $('link[rel~="preload"], link[rel~="prefetch"], link[rel~="modulepreload"], link[rel~="preconnect"], link[rel~="dns-prefetch"]').remove();
+  // Handle resource hints: preserve font preloads so the page's own fonts load
+  // correctly; strip other hints that are either unnecessary in the iframe or
+  // would cause issues.  Font preload hrefs are proxied by the href-rewriting
+  // pass below — don't proxy them here to avoid double-proxying.
+  $('link[rel~="preload"]').each((_, el) => {
+    const asVal = ($(el).attr('as') || '').toLowerCase();
+    if (asVal !== 'font') {
+      $(el).remove();
+    }
+    // Font preloads are kept; their href gets proxied by the href-rewriting loop below.
+  });
+  $('link[rel~="prefetch"], link[rel~="modulepreload"], link[rel~="preconnect"], link[rel~="dns-prefetch"]').remove();
 
   // Remove blocked third-party scripts
   $('script[src]').each((_, el) => {
@@ -162,7 +178,7 @@ export async function GET(
     const src = $(el).attr('src') || '';
     if (!src || /^(data:|blob:|javascript:)/i.test(src)) return;
     const abs = absoluteUrl(base, src);
-    $(el).attr('src', proxiedUrl(site, abs));
+    $(el).attr('src', proxiedUrl(site, abs, siteOrigin));
   });
 
   $('[href]').each((_, el) => {
@@ -172,7 +188,7 @@ export async function GET(
     // Stylesheet hrefs → proxy; anchor hrefs → leave as absolute (will 404 gracefully)
     if (rel.includes('stylesheet') || el.tagName === 'link') {
       const abs = absoluteUrl(base, href);
-      $(el).attr('href', proxiedUrl(site, abs));
+      $(el).attr('href', proxiedUrl(site, abs, siteOrigin));
     }
     // <a href> — rewrite to absolute so relative links don't 404 in our origin,
     // but don't proxy them (navigation is handled by the parent app).
@@ -187,7 +203,7 @@ export async function GET(
     const rewritten = srcset.split(',').map(part => {
       const [u, d] = part.trim().split(/\s+/, 2);
       if (!u || /^(data:|blob:)/i.test(u)) return part;
-      const proxied = proxiedUrl(site, absoluteUrl(base, u));
+      const proxied = proxiedUrl(site, absoluteUrl(base, u), siteOrigin);
       return d ? `${proxied} ${d}` : proxied;
     }).join(', ');
     $(el).attr('srcset', rewritten);
@@ -198,12 +214,19 @@ export async function GET(
     const style = $(el).attr('style') || '';
     const rewritten = style.replace(/url\(['"]?([^'")]+)['"]?\)/g, (_m, u) => {
       if (/^(data:|blob:)/i.test(u)) return _m;
-      return `url(${proxiedUrl(site, absoluteUrl(base, u))})`;
+      return `url(${proxiedUrl(site, absoluteUrl(base, u), siteOrigin)})`;
     });
     $(el).attr('style', rewritten);
   });
 
-  // ── 4. Inject content script as first child of <head> ─────────────────
+  // ── 4. Inject content script and helpers into <head> ──────────────────
+  // The heading font-inherit rule is inserted first (lowest cascade order) so
+  // the original page's own font-family declarations always override it.  It
+  // only kicks in for headings whose font-family isn't set explicitly, ensuring
+  // they inherit the page's font rather than the browser UA default.
+  $('head').prepend('<style data-proxy-injected="1">h1, h2, h3, h4, h5, h6 { font-family: inherit; }</style>');
+  // Content script goes on top so its URL interceptors are active before any
+  // other scripts run.
   $('head').prepend(contentScript(site));
 
   // ── 5. Return ─────────────────────────────────────────────────────────
