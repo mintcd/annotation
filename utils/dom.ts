@@ -91,6 +91,15 @@ export function shortenedHtml(html: string, maxLength: number = 150): string {
         }
       }
 
+      // Strip at word boundary: walk back to the end of the previous word
+      let wordCut = cutIndex;
+      while (wordCut > 0 && !/\s/.test(txt[wordCut - 1])) {
+        wordCut--;
+      }
+      // Only use the word boundary if we actually found whitespace;
+      // otherwise fall back to the original cutIndex to avoid empty output
+      if (wordCut > 0) cutIndex = wordCut;
+
       // Final safe cut
       appendTextFragment(outParent, txt.slice(0, cutIndex));
       count += cutIndex;
@@ -137,8 +146,8 @@ export function shortenedHtml(html: string, maxLength: number = 150): string {
     visit(c, out);
   }
 
-  // Trim trailing whitespace in output
-  return out.innerHTML.trim() + "...";
+  // Trim trailing whitespace in output; only append "..." if the text was truncated
+  return out.innerHTML.trim() + (finished ? "..." : "");
 }
 
 export function rangeToHtml(range: Range | null): string {
