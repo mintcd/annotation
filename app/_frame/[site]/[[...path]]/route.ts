@@ -41,10 +41,9 @@ function proxiedUrl(slug: string, absolute: string): string {
 
 // Tiny script injected at top of <head> inside the iframe.
 // • Rewrites runtime root-relative URLs → /_proxy/{slug}/…
-// • Fires window.parent.postMessage on text selection so the parent can show
-//   the annotation toolbar.
 function contentScript(slug: string): string {
-  return `<script data-proxy-injected="1">(function(){
+  return (
+    `<script data-proxy-injected="1">(function(){
   // ── Root-relative URL interceptor ──────────────────────────────────────
   var slug=${JSON.stringify(slug)};
   var base='/_proxy/'+slug;
@@ -84,15 +83,15 @@ function contentScript(slug: string): string {
     if(typeof url==='string')url=rw(url);
     return origOpen.apply(this,[method,url].concat(Array.prototype.slice.call(arguments,2)));
   };
-  // ── Selection → parent ─────────────────────────────────────────────────
-  document.addEventListener('selectionchange',function(){
-    try{
-      var sel=window.getSelection();
-      var text=sel?sel.toString().trim():'';
-      window.parent.postMessage({type:'proxy:selection',text:text},'*');
-    }catch(e){}
-  });
-})();</script>`;
+})();
+window.addEventListener('error', function(e) {
+  window.parent.postMessage({ type: 'proxy:error', message: e.message, filename: e.filename, lineno: e.lineno }, '*');
+});
+window.addEventListener('unhandledrejection', function(e) {
+  window.parent.postMessage({ type: 'proxy:error', message: String(e.reason) }, '*');
+});
+</script>`
+  );
 }
 
 export async function GET(
@@ -169,10 +168,13 @@ export async function GET(
     const href = $(el).attr('href') || '';
     if (!href || /^(#|mailto:|tel:|javascript:)/i.test(href)) return;
     const rel = $(el).attr('rel') || '';
-    // Stylesheet hrefs → proxy; anchor hrefs → leave as absolute (will 404 gracefully)
+    // Stylesheet hrefs → proxy if same-origin, leave absolute if external CDN
+    // (external font CDNs like fonts.googleapis.com have CORS headers; proxying
+    // them strips their hostname and causes a 404, breaking web fonts).
     if (rel.includes('stylesheet') || el.tagName === 'link') {
       const abs = absoluteUrl(base, href);
-      $(el).attr('href', proxiedUrl(site, abs));
+      const isSameOrigin = (() => { try { return new URL(abs).origin === pageUrl.origin; } catch { return false; } })();
+      $(el).attr('href', isSameOrigin ? proxiedUrl(site, abs) : abs);
     }
     // <a href> — rewrite to absolute so relative links don't 404 in our origin,
     // but don't proxy them (navigation is handled by the parent app).

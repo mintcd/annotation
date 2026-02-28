@@ -28,7 +28,7 @@ export async function generateMetadata({
   const search = buildSearch(await searchParams);
 
   const website = await getWebsiteBySlug(site);
-  if (!website) return { title: "Not Found 2" };
+  if (!website) return { title: "Not Found" };
 
   // Don't call getClonedPage here — it causes Next.js/vinext to hoist every
   // <link> element from the cloned HTML into the RSC stream as resource hints,
