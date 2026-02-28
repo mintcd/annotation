@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useRef, useState, useCallback } from "react";
+import React, { useMemo, useRef, useState, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAnnotationContext } from "../context/Annotator.context";
 import { useMobile, useHotkey } from "../hooks";
@@ -22,7 +22,9 @@ export default function Sidebar() {
   // Mobile detection and viewport tracking
   const { isMobile, isIOS, viewportInfo } = useMobile();
   const [open, setOpen] = useState(false);
-  const showToggleButton = useMobileToggle(isMobile);
+  const _showToggleButton = useMobileToggle(isMobile);
+  // Always show the toggle button when the sidebar is closed so it can always be reopened.
+  const showToggleButton = _showToggleButton || !open;
 
   const scrollToAnnotation = useCallback((id: string) => {
     const spans = document.querySelectorAll<HTMLSpanElement>(`[data-highlight-id="${escapeAttrValue(id)}"]`);
@@ -49,6 +51,16 @@ export default function Sidebar() {
     () => setOpen((o: boolean) => !o));
 
   useClickOutside(sidebarRef as React.RefObject<HTMLElement>, () => setOpen(false));
+
+  // Close the sidebar when focus moves into the iframe (user clicks on page content).
+  // This replaces the formerly broken "click-outside" path for iframe-hosted content
+  // since pointer events inside the iframe don't bubble to the parent document.
+  useEffect(() => {
+    if (!open) return;
+    const handleBlur = () => setOpen(false);
+    window.addEventListener('blur', handleBlur);
+    return () => window.removeEventListener('blur', handleBlur);
+  }, [open]);
   // Memoize panel width calculation
   const panelWidthStyle: React.CSSProperties = useMemo(() =>
     isMobile ? { width: viewportInfo.visualWidth } : { width }, [isMobile, viewportInfo.visualWidth, width]);
