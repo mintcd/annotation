@@ -11,7 +11,8 @@ type UseMobileReturn = {
     visualWidth: number;
     visualHeight: number;
     offsetTop: number;
-    offsetLeft: number
+    offsetLeft: number;
+    scale: number;
   };
   updateViewportInfo: () => void;
 };
@@ -19,7 +20,7 @@ type UseMobileReturn = {
 export function useMobile(): UseMobileReturn {
   const [isMobile, setIsMobile] = useState<boolean>(false);
   const [isIOS, setIsIOS] = useState<boolean>(false);
-  const [viewportInfo, setViewportInfo] = useState<{ layoutWidth: number; layoutHeight: number; visualWidth: number; visualHeight: number; offsetTop: number; offsetLeft: number }>({ layoutWidth: 0, layoutHeight: 0, visualWidth: 0, visualHeight: 0, offsetTop: 0, offsetLeft: 0 });
+  const [viewportInfo, setViewportInfo] = useState<{ layoutWidth: number; layoutHeight: number; visualWidth: number; visualHeight: number; offsetTop: number; offsetLeft: number; scale: number }>({ layoutWidth: 0, layoutHeight: 0, visualWidth: 0, visualHeight: 0, offsetTop: 0, offsetLeft: 0, scale: 1 });
 
   useEffect(() => {
     const checkTouch = () => {
@@ -37,7 +38,8 @@ export function useMobile(): UseMobileReturn {
         visualWidth: window.visualViewport.width,
         visualHeight: window.visualViewport.height,
         offsetTop: window.visualViewport.offsetTop,
-        offsetLeft: window.visualViewport.offsetLeft
+        offsetLeft: window.visualViewport.offsetLeft,
+        scale: window.visualViewport.scale,
       });
     }
   }, []);
