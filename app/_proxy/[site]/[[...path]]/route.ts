@@ -12,6 +12,31 @@
 
 import { getEnv } from "../../../../utils/env";
 
+/**
+ * Fetch `url` while preserving all request headers (including Cookie) across
+ * every redirect step.  Cloudflare Workers' built-in `redirect:'follow'`
+ * silently strips the Cookie header on cross-origin redirects, which causes
+ * paywalled sites to ignore authentication cookies after the first hop.
+ */
+async function fetchWithCookies(
+  url: string,
+  init: { method: string; headers: Record<string, string> },
+  maxRedirects = 10,
+): Promise<Response> {
+  let currentUrl = url;
+  for (let i = 0; i < maxRedirects; i++) {
+    const res = await fetch(currentUrl, { ...init, redirect: 'manual' });
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get('location');
+      if (!location) return res;
+      currentUrl = new URL(location, currentUrl).href;
+    } else {
+      return res;
+    }
+  }
+  return fetch(currentUrl, { ...init, redirect: 'manual' });
+}
+
 /** Appended to every proxied script — mirrors the snippet in clone.ts. */
 function makeSignalSnippet(url: string): string {
   const payload = JSON.stringify({ url });
@@ -72,10 +97,9 @@ export async function GET(
   };
   if (typeof siteCookie === 'string' && siteCookie.trim()) reqHeaders['Cookie'] = siteCookie;
 
-  const upstream = await fetch(targetUrl, {
+  const upstream = await fetchWithCookies(targetUrl, {
     method: "GET",
     headers: reqHeaders,
-    redirect: "follow",
   });
 
   if (!upstream.ok) {

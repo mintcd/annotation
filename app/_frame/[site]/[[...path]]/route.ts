@@ -10,6 +10,32 @@
 import * as cheerio from 'cheerio';
 import { getEnv } from '@/utils/env';
 
+/**
+ * Fetch `url` while preserving all request headers (including Cookie) across
+ * every redirect step.  Cloudflare Workers' built-in `redirect:'follow'`
+ * silently strips the Cookie header on cross-origin redirects, which causes
+ * paywalled sites to ignore authentication cookies after the first hop.
+ */
+async function fetchWithCookies(
+  url: string,
+  init: { headers: Record<string, string> },
+  maxRedirects = 10,
+): Promise<Response> {
+  let currentUrl = url;
+  for (let i = 0; i < maxRedirects; i++) {
+    const res = await fetch(currentUrl, { ...init, redirect: 'manual' });
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get('location');
+      if (!location) return res;
+      currentUrl = new URL(location, currentUrl).href;
+    } else {
+      return res;
+    }
+  }
+  // Exhausted redirect budget — return whatever we got last
+  return fetch(currentUrl, { ...init, redirect: 'manual' });
+}
+
 const BLOCKED_SCRIPT_HOSTS = [
   'googletagmanager.com', 'google-analytics.com', 'analytics.google.com',
   'hotjar.com', 'static.hotjar.com', 'script.hotjar.com',
@@ -144,10 +170,7 @@ export async function GET(
     };
     if (typeof siteCookie === 'string' && siteCookie.trim()) headers['Cookie'] = siteCookie;
 
-    const res = await fetch(targetUrl, {
-      redirect: 'follow',
-      headers: headers,
-    });
+    const res = await fetchWithCookies(targetUrl, { headers });
     if (!res.ok) return new Response(`Upstream ${res.status}`, { status: 502 });
     const ct = res.headers.get('Content-Type') || '';
     if (!ct.includes('text/html')) return new Response('Not an HTML page', { status: 415 });
