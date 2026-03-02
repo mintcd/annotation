@@ -38,8 +38,9 @@ export async function POST(request: Request) {
     title?: string;
     number_of_scripts?: number;
   };
-  if (!body.url || !body.title)
-    return err("Missing required fields: url, title", 400);
+  if (!body.url) return err("Missing required field: url", 400);
+
+  const title = body.title ?? '';
 
   const id = await generatePageId(body.url);
   const ts = now();
@@ -52,7 +53,7 @@ export async function POST(request: Request) {
        updated_at = excluded.updated_at
      RETURNING *`
   )
-    .bind(id, body.url, body.title, body.number_of_scripts || 0, ts, ts)
+    .bind(id, body.url, title, body.number_of_scripts || 0, ts, ts)
     .first<Page>();
   return json(page);
 }

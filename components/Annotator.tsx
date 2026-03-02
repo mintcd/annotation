@@ -77,7 +77,15 @@ export default function Annotator({ annotations, title: titleProp, pageUrl, ifra
 
   // Write back the observed script count the first time matching fully succeeds.
   useEffect(() => {
-    if (allMatched) notifyMatchSuccess(title);
+    if (allMatched) {
+      // Prefer the local `title` state, but fall back to reading the iframe's
+      // document.title (in case it wasn't available earlier) and finally
+      // fall back to the pageUrl so the DB always has a non-empty title.
+      const iframe = iframeRef.current;
+      const docTitle = iframe?.contentDocument?.title;
+      const effectiveTitle = title || docTitle || pageUrl;
+      notifyMatchSuccess(effectiveTitle);
+    }
   }, [allMatched, notifyMatchSuccess, title]);
 
   const [pendingHref, setPendingHref] = useState<string | null>(null);

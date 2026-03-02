@@ -1,15 +1,14 @@
 // ─── Framed Page Proxy ───────────────────────────────────────────────────────
 //
 // Serves a fully-rewritten HTML page so it can be loaded inside a same-origin
-// <iframe>. All resource URLs are rewritten to /_proxy/{slug}/… so assets load
-// correctly. Scripts execute natively in the iframe's own window — no manual
-// injection or ordering needed.
+// <iframe>. Resource URLs are rewritten to /_proxy/{slug}/… so assets load
+// correctly. Scripts execute natively in the iframe's own window.
 //
 // Because the iframe shares our origin, the parent app has full
 // iframe.contentDocument access for highlight injection and range matching.
 
 import * as cheerio from 'cheerio';
-import { getEnv } from '../../../../utils/env';
+import { getEnv } from '@/utils/env';
 
 const BLOCKED_SCRIPT_HOSTS = [
   'googletagmanager.com', 'google-analytics.com', 'analytics.google.com',
@@ -125,6 +124,10 @@ export async function GET(
       .bind(site).first<{ origin: string }>();
     if (!row) return new Response(`Unknown site: ${site}`, { status: 404 });
     siteOrigin = row.origin;
+    // Optionally load a stored Cookie header for this site (set via /api/cookies)
+    const cookieRow = await env.DB.prepare('SELECT cookie FROM site_cookies WHERE site_id = ?')
+      .bind(site).first<{ cookie: string }>();
+    var siteCookie: string | null = cookieRow ? cookieRow.cookie : null;
   } catch {
     return new Response('Database unavailable', { status: 503 });
   }
@@ -136,9 +139,14 @@ export async function GET(
   let html: string;
   let finalUrl: string;
   try {
+    const headers: Record<string,string> = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    };
+    if (typeof siteCookie === 'string' && siteCookie.trim()) headers['Cookie'] = siteCookie;
+
     const res = await fetch(targetUrl, {
       redirect: 'follow',
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+      headers: headers,
     });
     if (!res.ok) return new Response(`Upstream ${res.status}`, { status: 502 });
     const ct = res.headers.get('Content-Type') || '';
