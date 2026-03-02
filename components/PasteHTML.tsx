@@ -4,7 +4,7 @@ import { useState } from 'react';
 import promptBoxStyles from '../styles/PromptBox.styles';
 
 type Props = {
-  error: string;
+  error?: string;
   site: string;
   /** path without leading slash, e.g. "article/10.1007/s11098-025-02457-y" */
   path: string;

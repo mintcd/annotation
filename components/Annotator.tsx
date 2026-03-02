@@ -169,9 +169,9 @@ export default function Annotator({ annotations, title: titleProp, pageUrl, ifra
       {(!allMatched && !isMatching) && (
         <Loader />)}
 
-      {showPasteHTML && frameError && (
+      {showPasteHTML && (
         <PasteHTML
-          error={frameError}
+          error={frameError ?? undefined}
           site={iframeSite}
           path={iframePath}
           onSuccess={() => {
