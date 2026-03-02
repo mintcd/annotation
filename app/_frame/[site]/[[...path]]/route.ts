@@ -119,7 +119,6 @@ export async function GET(
   // ── 1. Resolve origin ──────────────────────────────────────────────────
   let siteOrigin: string;
   let apiUrl: string;
-  let apiSecret: string;
   try {
     const env = getEnv();
     const row = await env.DB.prepare('SELECT origin FROM websites WHERE id = ?')
@@ -131,7 +130,6 @@ export async function GET(
       .bind(site).first<{ cookie: string }>();
     var siteCookie: string | null = cookieRow ? cookieRow.cookie : null;
     apiUrl = env.ANNOTATION_API_URL;
-    apiSecret = env.ANNOTATION_API_SECRET;
   } catch {
     return new Response('Database unavailable', { status: 503 });
   }
@@ -147,7 +145,6 @@ export async function GET(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Proxy-Secret': apiSecret,
       },
       body: JSON.stringify({
         url: targetUrl,
