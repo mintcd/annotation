@@ -43,7 +43,7 @@
   "env": {
     "production": {
       "vars": {
-        "ANNOTATION_API_URL": "https://annotation-api.vercel.app"
+        "ANNOTATION_API_URL": "https://annotation-api.onrender.com"
       }
       // ANNOTATION_API_SECRET must be set as a production secret:
       // wrangler secret put ANNOTATION_API_SECRET --env production
