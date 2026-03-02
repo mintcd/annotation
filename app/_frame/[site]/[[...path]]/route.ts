@@ -109,6 +109,29 @@ window.addEventListener('unhandledrejection', function(e) {
   );
 }
 
+/**
+ * Follow redirects manually so the Cookie header is preserved on every hop.
+ * (The Fetch spec strips Cookie on cross-origin redirects with redirect:'follow'.)
+ */
+async function fetchWithCookies(
+  url: string,
+  headers: Record<string, string>,
+  maxRedirects = 10,
+): Promise<Response> {
+  let currentUrl = url;
+  for (let i = 0; i < maxRedirects; i++) {
+    const res = await fetch(currentUrl, { headers, redirect: 'manual' });
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get('location');
+      if (!location) return res;
+      currentUrl = new URL(location, currentUrl).href;
+    } else {
+      return res;
+    }
+  }
+  return fetch(currentUrl, { headers, redirect: 'manual' });
+}
+
 export async function GET(
   request: Request,
   { params }: { params: { site: string; path?: string[] } }
@@ -118,7 +141,6 @@ export async function GET(
 
   // ── 1. Resolve origin ──────────────────────────────────────────────────
   let siteOrigin: string;
-  let apiUrl: string;
   try {
     const env = getEnv();
     const row = await env.DB.prepare('SELECT origin FROM websites WHERE id = ?')
@@ -129,7 +151,6 @@ export async function GET(
     const cookieRow = await env.DB.prepare('SELECT cookie FROM site_cookies WHERE site_id = ?')
       .bind(site).first<{ cookie: string }>();
     var siteCookie: string | null = cookieRow ? cookieRow.cookie : null;
-    apiUrl = env.ANNOTATION_API_URL;
   } catch {
     return new Response('Database unavailable', { status: 503 });
   }
@@ -141,23 +162,17 @@ export async function GET(
   let html: string;
   let finalUrl: string;
   try {
-    const proxyRes = await fetch(`${apiUrl}/fetch`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        url: targetUrl,
-        cookie: siteCookie ?? undefined,
-      }),
-    });
-    if (!proxyRes.ok) {
-      const body = await proxyRes.text();
-      return new Response(`annotation-api error ${proxyRes.status}: ${body}`, { status: 502 });
+    const reqHeaders: Record<string, string> = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    };
+    if (siteCookie?.trim()) reqHeaders['Cookie'] = siteCookie;
+    const upstream = await fetchWithCookies(targetUrl, reqHeaders);
+    if (!upstream.ok) {
+      return new Response(`Upstream error ${upstream.status} ${upstream.statusText}`, { status: 502 });
     }
-    const data = await proxyRes.json() as { html: string; finalUrl: string };
-    html = data.html;
-    finalUrl = data.finalUrl;
+    html = await upstream.text();
+    finalUrl = upstream.url;
   } catch (e) {
     return new Response(`Fetch error: ${e}`, { status: 502 });
   }
