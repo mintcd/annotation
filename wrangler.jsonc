@@ -35,5 +35,18 @@
       "enabled": true,
       "invocation_logs": true
     }
+  },
+  // Default vars used by `wrangler dev`
+  "vars": {
+    "ANNOTATION_API_URL": "http://localhost:3001"
+  },
+  "env": {
+    "production": {
+      "vars": {
+        "ANNOTATION_API_URL": "https://annotation-api.vercel.app"
+      }
+      // ANNOTATION_API_SECRET must be set as a production secret:
+      // wrangler secret put ANNOTATION_API_SECRET --env production
+    }
   }
 }

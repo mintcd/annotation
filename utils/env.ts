@@ -6,6 +6,10 @@
 export interface Env {
   DB: D1Database;
   ANNOTATIONS_BUCKET: R2Bucket;
+  /** Base URL of the annotation-api Vercel deployment, e.g. https://annotation-api.vercel.app */
+  ANNOTATION_API_URL: string;
+  /** Shared secret sent as X-Proxy-Secret to prevent open-proxy abuse. */
+  ANNOTATION_API_SECRET: string;
 }
 
 declare global {

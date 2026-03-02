@@ -10,32 +10,6 @@
 import * as cheerio from 'cheerio';
 import { getEnv } from '@/utils/env';
 
-/**
- * Fetch `url` while preserving all request headers (including Cookie) across
- * every redirect step.  Cloudflare Workers' built-in `redirect:'follow'`
- * silently strips the Cookie header on cross-origin redirects, which causes
- * paywalled sites to ignore authentication cookies after the first hop.
- */
-async function fetchWithCookies(
-  url: string,
-  init: { headers: Record<string, string> },
-  maxRedirects = 10,
-): Promise<Response> {
-  let currentUrl = url;
-  for (let i = 0; i < maxRedirects; i++) {
-    const res = await fetch(currentUrl, { ...init, redirect: 'manual' });
-    if (res.status >= 300 && res.status < 400) {
-      const location = res.headers.get('location');
-      if (!location) return res;
-      currentUrl = new URL(location, currentUrl).href;
-    } else {
-      return res;
-    }
-  }
-  // Exhausted redirect budget — return whatever we got last
-  return fetch(currentUrl, { ...init, redirect: 'manual' });
-}
-
 const BLOCKED_SCRIPT_HOSTS = [
   'googletagmanager.com', 'google-analytics.com', 'analytics.google.com',
   'hotjar.com', 'static.hotjar.com', 'script.hotjar.com',
@@ -144,6 +118,8 @@ export async function GET(
 
   // ── 1. Resolve origin ──────────────────────────────────────────────────
   let siteOrigin: string;
+  let apiUrl: string;
+  let apiSecret: string;
   try {
     const env = getEnv();
     const row = await env.DB.prepare('SELECT origin FROM websites WHERE id = ?')
@@ -154,6 +130,8 @@ export async function GET(
     const cookieRow = await env.DB.prepare('SELECT cookie FROM site_cookies WHERE site_id = ?')
       .bind(site).first<{ cookie: string }>();
     var siteCookie: string | null = cookieRow ? cookieRow.cookie : null;
+    apiUrl = env.ANNOTATION_API_URL;
+    apiSecret = env.ANNOTATION_API_SECRET;
   } catch {
     return new Response('Database unavailable', { status: 503 });
   }
@@ -165,17 +143,24 @@ export async function GET(
   let html: string;
   let finalUrl: string;
   try {
-    const headers: Record<string, string> = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    };
-    if (typeof siteCookie === 'string' && siteCookie.trim()) headers['Cookie'] = siteCookie;
-
-    const res = await fetchWithCookies(targetUrl, { headers });
-    if (!res.ok) return new Response(`Upstream ${res.status}`, { status: 502 });
-    const ct = res.headers.get('Content-Type') || '';
-    if (!ct.includes('text/html')) return new Response('Not an HTML page', { status: 415 });
-    html = await res.text();
-    finalUrl = res.url;
+    const proxyRes = await fetch(`${apiUrl}/fetch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Proxy-Secret': apiSecret,
+      },
+      body: JSON.stringify({
+        url: targetUrl,
+        cookie: siteCookie ?? undefined,
+      }),
+    });
+    if (!proxyRes.ok) {
+      const body = await proxyRes.text();
+      return new Response(`annotation-api error ${proxyRes.status}: ${body}`, { status: 502 });
+    }
+    const data = await proxyRes.json() as { html: string; finalUrl: string };
+    html = data.html;
+    finalUrl = data.finalUrl;
   } catch (e) {
     return new Response(`Fetch error: ${e}`, { status: 502 });
   }
