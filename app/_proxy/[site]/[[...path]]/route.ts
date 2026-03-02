@@ -53,6 +53,10 @@ export async function GET(
       return new Response(`Unknown site slug: ${site}`, { status: 404 });
     }
     siteOrigin = row.origin; // e.g. "https://plato.stanford.edu"
+    // Optionally load a stored Cookie header for this site (set via /api/cookies)
+    const cookieRow = await env.DB.prepare('SELECT cookie FROM site_cookies WHERE site_id = ?')
+      .bind(site).first<{ cookie: string }>();
+    var siteCookie: string | null = cookieRow ? cookieRow.cookie : null;
   } catch {
     return new Response("Database unavailable", { status: 503 });
   }
@@ -63,12 +67,15 @@ export async function GET(
   const targetUrl = `${siteOrigin}${pathname}${search}`;
 
   // ── 3. Fetch upstream ────────────────────────────────────────────────────
+  const headers: Record<string, string> = {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  };
+  if (typeof siteCookie === 'string' && siteCookie.trim()) headers['Cookie'] = siteCookie;
+
   const upstream = await fetch(targetUrl, {
     method: "GET",
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    },
+    headers,
     redirect: "follow",
   });
 
