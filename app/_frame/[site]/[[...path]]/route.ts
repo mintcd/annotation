@@ -110,9 +110,48 @@ window.addEventListener('unhandledrejection', function(e) {
 }
 
 /**
- * Follow redirects manually so the Cookie header is preserved on every hop.
- * (The Fetch spec strips Cookie on cross-origin redirects with redirect:'follow'.)
+ * Content script injected into stored/pasted HTML.
+ * Unlike the proxy variant, this one rewrites root-relative fetch()/XHR
+ * directly to the original site origin rather than routing through _proxy.
+ * HTML-level attributes (src/href) are handled by a <base> tag instead.
  */
+function contentScriptDirect(origin: string): string {
+  return (
+    `<script data-proxy-injected="1">(function(){
+  var origin=${JSON.stringify(origin)};
+  var BLOCKED=${JSON.stringify(BLOCKED_SCRIPT_HOSTS)};
+  function isBlocked(u){try{var h=new URL(u).hostname;return BLOCKED.some(function(d){return h===d||h.endsWith('.'+d);});}catch(e){return false;}}
+  function rw(u){
+    if(!u||typeof u!=='string')return u;
+    if(u.startsWith('/')&&!u.startsWith('//')&&!u.startsWith('/_next/')&&!u.startsWith('/api/'))
+      return origin+u;
+    return u;
+  }
+  // Block analytics scripts that sneak in dynamically
+  var sDesc=Object.getOwnPropertyDescriptor(HTMLScriptElement.prototype,'src');
+  if(sDesc&&sDesc.set){
+    Object.defineProperty(HTMLScriptElement.prototype,'src',{get:sDesc.get,set:function(v){
+      if(typeof v==='string'&&isBlocked(v)){this.type='javascript/blocked';return;}
+      sDesc.set.call(this,v);
+    },configurable:true});
+  }
+  // Rewrite root-relative fetch/XHR to original origin
+  var origFetch=window.fetch;
+  window.fetch=function(input,init){
+    if(typeof input==='string')input=rw(input);
+    else if(input&&typeof input==='object'&&input.url){var u=rw(input.url);if(u!==input.url)input=new Request(u,input);}
+    return origFetch.call(this,input,init);
+  };
+  var origOpen=XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open=function(method,url){
+    if(typeof url==='string')url=rw(url);
+    return origOpen.apply(this,[method,url].concat(Array.prototype.slice.call(arguments,2)));
+  };
+})();
+</script>`
+  );
+}
+
 async function fetchWithCookies(
   url: string,
   headers: Record<string, string>,
@@ -147,18 +186,48 @@ function frameErrorResponse(message: string): Response {
   });
 }
 
+/**
+ * Attempts to fetch a page via the configured browser worker (Browserless on CF Containers).
+ * Returns the HTML string on success, or null if the worker is not configured / fails.
+ */
+async function tryBrowserWorker(
+  env: ReturnType<typeof getEnv>,
+  url: string,
+  headers: Record<string, string>,
+  cookie: string | null,
+): Promise<string | null> {
+  const { BROWSER_WORKER_URL, BROWSER_WORKER_TOKEN } = env;
+  if (!BROWSER_WORKER_URL || !BROWSER_WORKER_TOKEN) return null;
+  try {
+    const res = await fetch(`${BROWSER_WORKER_URL}/fetch`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${BROWSER_WORKER_TOKEN}`,
+      },
+      body: JSON.stringify({ url, headers, cookie: cookie ?? undefined }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json() as { html?: string; error?: string };
+    return data.html ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(
   request: Request,
   { params }: { params: { site: string; path?: string[] } }
 ) {
   const { site, path } = params;
   const reqUrl = new URL(request.url);
+  let env: ReturnType<typeof getEnv>;
 
   // ── 1. Resolve origin ──────────────────────────────────────────────────
   let siteOrigin: string;
   let storedHtml: string | null = null;
   try {
-    const env = getEnv();
+    env = getEnv();
     const row = await env.DB.prepare('SELECT origin FROM websites WHERE id = ?')
       .bind(site).first<{ origin: string }>();
     if (!row) return new Response(`Unknown site: ${site}`, { status: 404 });
@@ -184,7 +253,7 @@ export async function GET(
   let finalUrl: string;
 
   if (storedHtml) {
-    // Use the user-pasted HTML from R2 — skip upstream fetch
+    // Use the user-pasted HTML from R2 - skip upstream fetch
     html = storedHtml;
     finalUrl = targetUrl;
   } else {
@@ -205,18 +274,59 @@ export async function GET(
       // Override referer/origin to the target site so it looks like direct navigation
       reqHeaders['referer'] = siteOrigin + '/';
       if (siteCookie?.trim()) reqHeaders['cookie'] = siteCookie;
+
       const upstream = await fetchWithCookies(targetUrl, reqHeaders);
+
       if (!upstream.ok) {
-        return frameErrorResponse(`Upstream error ${upstream.status} ${upstream.statusText}`);
+        // Direct fetch failed — try the browser worker if configured
+        const browserHtml = await tryBrowserWorker(env, targetUrl, reqHeaders, siteCookie);
+        if (browserHtml !== null) {
+          html = browserHtml;
+          finalUrl = targetUrl;
+        } else {
+          return frameErrorResponse(`Upstream error ${upstream.status} ${upstream.statusText}`);
+        }
+      } else {
+        html = await upstream.text();
+        finalUrl = upstream.url;
       }
-      html = await upstream.text();
-      finalUrl = upstream.url;
     } catch (e) {
-      return frameErrorResponse(`Fetch error: ${e}`);
+      // Network error — try the browser worker if configured
+      const browserHtml = await tryBrowserWorker(env, targetUrl, {}, siteCookie);
+      if (browserHtml !== null) {
+        html = browserHtml;
+        finalUrl = targetUrl;
+      } else {
+        return frameErrorResponse(`Fetch error: ${e}`);
+      }
     }
   }
 
-  // ── 3. Rewrite URLs ────────────────────────────────────────────────────
+  // ── 3. Stored HTML: serve with <base> tag, skip proxy rewriting ──────────
+  // Assets load directly from the original site in the user's browser.
+  // This avoids Akamai/bot-protection blocking our server-side proxy requests.
+  if (storedHtml) {
+    const $s = cheerio.load(html);
+    $s('meta[http-equiv="Content-Security-Policy"]').remove();
+    $s('meta[http-equiv="X-Frame-Options"]').remove();
+    // Remove existing base tag so ours takes precedence
+    $s('base').remove();
+    // Inject base tag + direct content script
+    $s('head').prepend(
+      `<base href=${JSON.stringify(targetUrl)}>` +
+      contentScriptDirect(siteOrigin)
+    );
+    return new Response($s.html(), {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'X-Frame-Options': 'SAMEORIGIN',
+      },
+    });
+  }
+
+  // ── 4. Rewrite URLs (fetched pages) ───────────────────────────────────
   const pageUrl = new URL(finalUrl);
   const baseTagHref = (() => {
     const m = html.match(/<base[^>]+href=["']([^"']+)["']/i);

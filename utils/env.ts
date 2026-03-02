@@ -7,6 +7,10 @@ export interface Env {
   DB: D1Database;
   ANNOTATIONS_BUCKET: R2Bucket;
   WEBPAGES_BUCKET: R2Bucket;
+  /** URL of the annotation-browser worker, e.g. https://annotation-browser.<account>.workers.dev */
+  BROWSER_WORKER_URL?: string;
+  /** Shared secret that matches AUTH_TOKEN in the browser worker */
+  BROWSER_WORKER_TOKEN?: string;
 }
 
 declare global {

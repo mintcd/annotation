@@ -57,8 +57,6 @@ export function useIframeTracking(
     if (!iframe || !iframe.contentWindow) return;
 
     const onLoad = () => {
-      // contentRef.current = findBestContentNode(iframe.contentDocument?.body ?? null);
-      setIframeReady(false);
       console.log(`[IframeTracking] iframe loaded, remoteScriptCount=${remoteScriptCountRef.current ?? 'pending'}`);
 
       const iWin = iframe.contentWindow;
@@ -95,7 +93,7 @@ export function useIframeTracking(
         // so there's a window between "scripts done" and "first DOM mutation"
         // where the settle timer would fire prematurely. The grace period ensures
         // the MutationObserver is already resetting the timer by the time it ticks.
-        const DOM_GRACE_MS = 500;
+        const DOM_GRACE_MS = 1000;
 
         const body = iframe.contentDocument?.body;
         if (!body) { return; }

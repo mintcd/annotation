@@ -30,10 +30,6 @@ export default function Annotator({ annotations, title: titleProp, pageUrl, ifra
   const iframePath = iframePathParts.slice(1).join('/');
 
   const { iframeReady, notifyMatchSuccess } = useIframeTracking(iframeRef, pageUrl);
-
-  // Post-process iframe content (remove cookie banners, overlays, etc.).
-  // Pass iframeReady so cleanup only runs after the DOM has settled, preventing
-  // cleanupDoc mutations from resetting the settle timer in useIframeTracking.
   const { contentRef, postprocessed: iframePostprocessed } = usePostprocessIframeRef(iframeRef, iframeReady);
 
   // Read title and detect frame errors after each iframe load.

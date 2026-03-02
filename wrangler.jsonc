@@ -43,7 +43,11 @@
     }
   },
   // Default vars used by `wrangler dev`
-  "vars": {},
+  // Set BROWSER_WORKER_TOKEN via: wrangler secret put BROWSER_WORKER_TOKEN --env production
+  "vars": {
+    "BROWSER_WORKER_URL": "",
+    "BROWSER_WORKER_TOKEN": ""
+  },
   "env": {
     "production": {}
   }
