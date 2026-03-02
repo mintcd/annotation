@@ -35,7 +35,7 @@
     "baseline-browser-mapping": "^2.10.0",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
-    "react-server-dom-webpack": "^0.0.1",
+    "react-server-dom-webpack": "^19.2.4",
     "typescript": "^5",
     "vinext": "^0.0.18",
     "vite": "^7.3.1",

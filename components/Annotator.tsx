@@ -7,6 +7,7 @@ import Sidebar from './Sidebar';
 import MenuOnRange from './MenuOnRange';
 import MenuOnFocus from './MenuOnFocus';
 import PromptBox from './PromptBox';
+import PasteHTML from './PasteHTML';
 import annotationStyles from "../styles/Annotator.styles";
 import Loader from './Loader';
 
@@ -20,6 +21,13 @@ type AnnotatorProps = {
 export default function Annotator({ annotations, title: titleProp, pageUrl, iframeUrl }: AnnotatorProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [title, setTitle] = useState(titleProp ?? '');
+  const [frameError, setFrameError] = useState<string | null>(null);
+  const [showPasteHTML, setShowPasteHTML] = useState(false);
+
+  // Parse site and path from iframeUrl: /_frame/<site>/<path...>
+  const iframePathParts = iframeUrl.replace(/^\/+_frame\//, '').split('?')[0].split('/');
+  const iframeSite = iframePathParts[0];
+  const iframePath = iframePathParts.slice(1).join('/');
 
   const { iframeReady, notifyMatchSuccess } = useIframeTracking(iframeRef, pageUrl);
 
@@ -64,6 +72,15 @@ export default function Annotator({ annotations, title: titleProp, pageUrl, ifra
       // Read the title directly from the loaded document
       const iframeTitle = iframe.contentDocument?.title;
       if (iframeTitle) setTitle(iframeTitle);
+      // Detect frame-error marker emitted by _frame/route.ts when fetch fails
+      const errorMeta = iframe.contentDocument?.querySelector('meta[name="frame-error"]');
+      const errMsg = errorMeta?.getAttribute('content');
+      if (errMsg) {
+        setFrameError(errMsg);
+        setShowPasteHTML(true);
+      } else {
+        setFrameError(null);
+      }
     };
 
     iframe.addEventListener('load', onLoad);
@@ -125,6 +142,7 @@ export default function Annotator({ annotations, title: titleProp, pageUrl, ifra
           contentReady={iframeReady}
           pageUrl={pageUrl}
           contentRef={contentRef}
+          onPasteHTML={() => setShowPasteHTML(true)}
         >
           <Sidebar />
           <MenuOnRange />
@@ -150,6 +168,32 @@ export default function Annotator({ annotations, title: titleProp, pageUrl, ifra
 
       {(!allMatched && !isMatching) && (
         <Loader />)}
+
+      {showPasteHTML && frameError && (
+        <PasteHTML
+          error={frameError}
+          site={iframeSite}
+          path={iframePath}
+          onSuccess={() => {
+            setShowPasteHTML(false);
+            setFrameError(null);
+            if (iframeRef.current) iframeRef.current.src = iframeUrl;
+          }}
+          onClose={() => setShowPasteHTML(false)}
+        />
+      )}
+
+      {frameError && !showPasteHTML && (
+        <div style={{ position: 'fixed', bottom: 16, right: 16, zIndex: 40, background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 8, padding: '0.5rem 1rem', fontSize: '0.8rem' }}>
+          Page failed to load.{' '}
+          <button
+            style={{ color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+            onClick={() => setShowPasteHTML(true)}
+          >
+            Paste HTML
+          </button>
+        </div>
+      )}
     </>
   );
 }

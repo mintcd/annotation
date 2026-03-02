@@ -132,6 +132,21 @@ async function fetchWithCookies(
   return fetch(currentUrl, { headers, redirect: 'manual' });
 }
 
+/**
+ * Returns an HTML page that signals an error to the parent Annotator component.
+ * The parent detects `<meta name="frame-error">` after iframe load and shows
+ * the "Paste HTML" fallback UI.
+ */
+function frameErrorResponse(message: string): Response {
+  const html = `<!doctype html><html><head>
+<meta name="frame-error" content=${JSON.stringify(message)}>
+</head><body></body></html>`;
+  return new Response(html, {
+    status: 200,
+    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+  });
+}
+
 export async function GET(
   request: Request,
   { params }: { params: { site: string; path?: string[] } }
@@ -141,6 +156,7 @@ export async function GET(
 
   // ── 1. Resolve origin ──────────────────────────────────────────────────
   let siteOrigin: string;
+  let storedHtml: string | null = null;
   try {
     const env = getEnv();
     const row = await env.DB.prepare('SELECT origin FROM websites WHERE id = ?')
@@ -151,6 +167,11 @@ export async function GET(
     const cookieRow = await env.DB.prepare('SELECT cookie FROM site_cookies WHERE site_id = ?')
       .bind(site).first<{ cookie: string }>();
     var siteCookie: string | null = cookieRow ? cookieRow.cookie : null;
+
+    // ── Check R2 bucket for user-pasted HTML ───────────────────────────
+    const r2Key = path?.length ? `${site}/${path.join('/')}` : site;
+    const stored = await env.WEBPAGES_BUCKET.get(r2Key);
+    if (stored) storedHtml = await stored.text();
   } catch {
     return new Response('Database unavailable', { status: 503 });
   }
@@ -161,31 +182,38 @@ export async function GET(
 
   let html: string;
   let finalUrl: string;
-  try {
-    // Forward real browser headers so Cloudflare Bot Management doesn't flag
-    // the request as bot traffic (it checks UA, sec-ch-ua, Accept-Language etc.)
-    const FORWARD_HEADERS = [
-      'user-agent', 'accept', 'accept-language', 'accept-encoding',
-      'sec-ch-ua', 'sec-ch-ua-mobile', 'sec-ch-ua-platform',
-      'sec-fetch-dest', 'sec-fetch-mode', 'sec-fetch-site',
-      'upgrade-insecure-requests', 'cache-control', 'pragma',
-    ];
-    const reqHeaders: Record<string, string> = {};
-    for (const h of FORWARD_HEADERS) {
-      const v = request.headers.get(h);
-      if (v) reqHeaders[h] = v;
+
+  if (storedHtml) {
+    // Use the user-pasted HTML from R2 — skip upstream fetch
+    html = storedHtml;
+    finalUrl = targetUrl;
+  } else {
+    try {
+      // Forward real browser headers so Cloudflare Bot Management doesn't flag
+      // the request as bot traffic (it checks UA, sec-ch-ua, Accept-Language etc.)
+      const FORWARD_HEADERS = [
+        'user-agent', 'accept', 'accept-language', 'accept-encoding',
+        'sec-ch-ua', 'sec-ch-ua-mobile', 'sec-ch-ua-platform',
+        'sec-fetch-dest', 'sec-fetch-mode', 'sec-fetch-site',
+        'upgrade-insecure-requests', 'cache-control', 'pragma',
+      ];
+      const reqHeaders: Record<string, string> = {};
+      for (const h of FORWARD_HEADERS) {
+        const v = request.headers.get(h);
+        if (v) reqHeaders[h] = v;
+      }
+      // Override referer/origin to the target site so it looks like direct navigation
+      reqHeaders['referer'] = siteOrigin + '/';
+      if (siteCookie?.trim()) reqHeaders['cookie'] = siteCookie;
+      const upstream = await fetchWithCookies(targetUrl, reqHeaders);
+      if (!upstream.ok) {
+        return frameErrorResponse(`Upstream error ${upstream.status} ${upstream.statusText}`);
+      }
+      html = await upstream.text();
+      finalUrl = upstream.url;
+    } catch (e) {
+      return frameErrorResponse(`Fetch error: ${e}`);
     }
-    // Override referer/origin to the target site so it looks like direct navigation
-    reqHeaders['referer'] = siteOrigin + '/';
-    if (siteCookie?.trim()) reqHeaders['cookie'] = siteCookie;
-    const upstream = await fetchWithCookies(targetUrl, reqHeaders);
-    if (!upstream.ok) {
-      return new Response(`Upstream error ${upstream.status} ${upstream.statusText}`, { status: 502 });
-    }
-    html = await upstream.text();
-    finalUrl = upstream.url;
-  } catch (e) {
-    return new Response(`Fetch error: ${e}`, { status: 502 });
   }
 
   // ── 3. Rewrite URLs ────────────────────────────────────────────────────

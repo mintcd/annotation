@@ -8,13 +8,13 @@ import { useResize, useClickOutside, useMobileToggle, usePreventScroll } from ".
 import AnnotationList from "./AnnotationList";
 import { sortAnnotations, sortOptions } from "../utils/annotations";
 import type { SortOption } from "../utils/annotations";
-import { BoxList, Sort } from "../app/icons";
+import { BoxList, Sort, PasteHtml } from "../app/icons";
 import Dropdown from "./Dropdown";
 import { escapeAttrValue } from "../utils/string";
 import styles from "../styles/Sidebar.styles";
 
 export default function Sidebar() {
-  const { annotations, syncStatus, contentRef } = useAnnotationContext()
+  const { annotations, syncStatus, contentRef, onPasteHTML } = useAnnotationContext()
   const [sortOption, setSortOption] = useState<SortOption>('dom-order');
   const items = useMemo(() => sortAnnotations(annotations, sortOption), [annotations, sortOption]);
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -134,6 +134,15 @@ export default function Sidebar() {
                 <span style={styles.syncedText}>Synced</span>
               ) : (
                 <span style={styles.syncingText}>Unsaved changes</span>
+              )}
+              {onPasteHTML && (
+                <button
+                  onClick={onPasteHTML}
+                  title="Paste HTML (use when page content is blocked)"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px 4px', color: 'inherit', opacity: 0.6, display: 'flex', alignItems: 'center' }}
+                >
+                  <PasteHtml size={14} />
+                </button>
               )}
             </span>
           </div>

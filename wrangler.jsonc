@@ -20,6 +20,12 @@
       "bucket_name": "annotations",
       "preview_bucket_name": "annotations",
       "remote": true
+    },
+    {
+      "binding": "WEBPAGES_BUCKET",
+      "bucket_name": "webpages",
+      "preview_bucket_name": "webpages",
+      "remote": true
     }
   ],
   "d1_databases": [

@@ -5,3 +5,4 @@ export { FaFolder as Folder, FaChevronDown as ChevronDown, FaChevronRight as Che
 export { MdDelete as Delete } from "react-icons/md";
 export { FaComment as Comment } from "react-icons/fa";
 export { IoMdSend as Send } from "react-icons/io";
+export { FaCode as PasteHtml } from "react-icons/fa";

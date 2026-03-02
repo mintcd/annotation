@@ -6,6 +6,7 @@
 export interface Env {
   DB: D1Database;
   ANNOTATIONS_BUCKET: R2Bucket;
+  WEBPAGES_BUCKET: R2Bucket;
 }
 
 declare global {
