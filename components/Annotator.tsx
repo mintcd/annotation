@@ -31,48 +31,19 @@ export default function Annotator({ annotations, title: titleProp, pageUrl, ifra
 
   const { iframeReady, notifyMatchSuccess } = useIframeTracking(iframeRef, pageUrl);
 
-  // Post-process iframe content (remove cookie banners, overlays, etc.)
-  const { contentRef, postprocessed: iframePostprocessed } = usePostprocessIframeRef(iframeRef);
+  // Post-process iframe content (remove cookie banners, overlays, etc.).
+  // Pass iframeReady so cleanup only runs after the DOM has settled, preventing
+  // cleanupDoc mutations from resetting the settle timer in useIframeTracking.
+  const { contentRef, postprocessed: iframePostprocessed } = usePostprocessIframeRef(iframeRef, iframeReady);
 
-  // Forward pointer and selection events from inside the iframe to the parent document
-  // so that hooks listening on `document` (MenuOnRange, etc.) receive them.
+  // Read title and detect frame errors after each iframe load.
   useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe) return;
 
-    const attach = () => {
-      const iDoc = iframe.contentDocument;
-      if (!iDoc) return;
-
-      const fwd = (e: Event) => {
-        try {
-          document.dispatchEvent(new (e.constructor as typeof Event)(e.type, { bubbles: true, cancelable: e.cancelable }));
-        } catch { /* ignore */ }
-      };
-
-      iDoc.addEventListener('pointerdown', fwd, { capture: true });
-      iDoc.addEventListener('pointerup', fwd, { capture: true });
-      iDoc.addEventListener('mousedown', fwd, { capture: true });
-      iDoc.addEventListener('touchstart', fwd, { capture: true, passive: true });
-      iDoc.addEventListener('selectionchange', fwd);
-
-      // Store cleanup on the iframe so we can run it before re-attaching.
-      (iframe as HTMLIFrameElement & { _fwdCleanup?: () => void })._fwdCleanup = () => {
-        iDoc.removeEventListener('pointerdown', fwd, { capture: true });
-        iDoc.removeEventListener('pointerup', fwd, { capture: true });
-        iDoc.removeEventListener('mousedown', fwd, { capture: true });
-        iDoc.removeEventListener('touchstart', fwd, { capture: true });
-        iDoc.removeEventListener('selectionchange', fwd);
-      };
-    };
-
     const onLoad = () => {
-      (iframe as HTMLIFrameElement & { _fwdCleanup?: () => void })._fwdCleanup?.();
-      attach();
-      // Read the title directly from the loaded document
       const iframeTitle = iframe.contentDocument?.title;
       if (iframeTitle) setTitle(iframeTitle);
-      // Detect frame-error marker emitted by _frame/route.ts when fetch fails
       const errorMeta = iframe.contentDocument?.querySelector('meta[name="frame-error"]');
       const errMsg = errorMeta?.getAttribute('content');
       if (errMsg) {
@@ -84,11 +55,7 @@ export default function Annotator({ annotations, title: titleProp, pageUrl, ifra
     };
 
     iframe.addEventListener('load', onLoad);
-    attach(); // in case already loaded
-    return () => {
-      iframe.removeEventListener('load', onLoad);
-      (iframe as HTMLIFrameElement & { _fwdCleanup?: () => void })._fwdCleanup?.();
-    };
+    return () => iframe.removeEventListener('load', onLoad);
   }, [iframeUrl]);
 
   // Enforce pipeline: wait for iframe tracking and postprocessing before matching
@@ -127,6 +94,8 @@ export default function Annotator({ annotations, title: titleProp, pageUrl, ifra
 
   useClickHref(iframeRef as RefObject<HTMLElement | null>, setPendingHref);
 
+  const handlePasteHTML = useCallback(() => setShowPasteHTML(true), []);
+
   return (
     <>
       <iframe
@@ -142,11 +111,24 @@ export default function Annotator({ annotations, title: titleProp, pageUrl, ifra
           contentReady={iframeReady}
           pageUrl={pageUrl}
           contentRef={contentRef}
-          onPasteHTML={() => setShowPasteHTML(true)}
+          iframeRef={iframeRef}
         >
-          <Sidebar />
+          <Sidebar onPasteHTML={handlePasteHTML} />
           <MenuOnRange />
           <MenuOnFocus />
+          {showPasteHTML && (
+            <PasteHTML
+              error={frameError ?? undefined}
+              site={iframeSite}
+              path={iframePath}
+              onSuccess={() => {
+                setShowPasteHTML(false);
+                setFrameError(null);
+                if (iframeRef.current) iframeRef.current.src = iframeUrl;
+              }}
+              onClose={() => setShowPasteHTML(false)}
+            />
+          )}
         </AnnotationContext>}
 
       {pendingHref && (
@@ -168,20 +150,6 @@ export default function Annotator({ annotations, title: titleProp, pageUrl, ifra
 
       {(!allMatched && !isMatching) && (
         <Loader />)}
-
-      {showPasteHTML && (
-        <PasteHTML
-          error={frameError ?? undefined}
-          site={iframeSite}
-          path={iframePath}
-          onSuccess={() => {
-            setShowPasteHTML(false);
-            setFrameError(null);
-            if (iframeRef.current) iframeRef.current.src = iframeUrl;
-          }}
-          onClose={() => setShowPasteHTML(false)}
-        />
-      )}
 
       {frameError && !showPasteHTML && (
         <div style={{ position: 'fixed', bottom: 16, right: 16, zIndex: 40, background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 8, padding: '0.5rem 1rem', fontSize: '0.8rem' }}>

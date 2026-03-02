@@ -14,8 +14,6 @@ type AnnotationContextProps = {
   contentRef: React.RefObject<HTMLElement>;
   /** Ref to the <iframe> element, when content is rendered inside one. */
   iframeRef?: React.RefObject<HTMLIFrameElement | null>;
-  /** Opens the Paste HTML dialog (to manually supply page HTML when auto-fetch is blocked). */
-  onPasteHTML?: () => void;
 };
 
 type AnnotationContextType = {
@@ -32,7 +30,6 @@ type AnnotationContextType = {
   syncStatus: 'synced' | 'syncing' | 'to-sync';
   lastAutoSaveStatus: { success: boolean; message: string } | null;
   contentReady: boolean;
-  onPasteHTML?: () => void;
 };
 
 const AnnotationContextProvider = createContext<AnnotationContextType | null>(null);
@@ -57,7 +54,6 @@ export function AnnotationContext({
   contentRef,
   contentReady,
   iframeRef,
-  onPasteHTML,
 }: AnnotationContextProps) {
   const [annotations, setAnnotations] = useState<AnnotationItem[]>(initialAnnotations);
   const [currentHighlightColor, setCurrentHighlightColor] = useState<string>("#87ceeb");
@@ -184,7 +180,7 @@ export function AnnotationContext({
     return 'synced';
   }, [isSyncing, pendingOperations]);
 
-  const value = {
+  const value = useMemo(() => ({
     contentRef,
     iframeRef,
     annotations,
@@ -198,8 +194,9 @@ export function AnnotationContext({
     syncStatus,
     lastAutoSaveStatus,
     contentReady: contentReady || false,
-    onPasteHTML,
-  };
+  }), [contentRef, iframeRef, annotations, pageUrl, title, currentHighlightColor,
+    setCurrentHighlightColor, addAnnotation, deleteAnnotation, updateAnnotation,
+    syncStatus, lastAutoSaveStatus, contentReady]);
 
   return (
     <AnnotationContextProvider value={value}>

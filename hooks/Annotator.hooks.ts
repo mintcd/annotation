@@ -54,7 +54,7 @@ export function useIframeTracking(
   // Attach to each new iframe document after load.
   useEffect(() => {
     const iframe = iframeRef.current;
-    if (!iframe) return;
+    if (!iframe || !iframe.contentWindow) return;
 
     const onLoad = () => {
       // contentRef.current = findBestContentNode(iframe.contentDocument?.body ?? null);
@@ -62,7 +62,7 @@ export function useIframeTracking(
       console.log(`[IframeTracking] iframe loaded, remoteScriptCount=${remoteScriptCountRef.current ?? 'pending'}`);
 
       const iWin = iframe.contentWindow;
-      if (!iWin) { setIframeReady(true); return; }
+      if (!iWin) { return; }
 
       const SIGNAL_QUIET = 500;   // ms of silence after last signal → done
       const MAX_WAIT = 10000; // hard ceiling
@@ -88,11 +88,17 @@ export function useIframeTracking(
         executedScriptsRef.current = signalCount;
         console.log(`[IframeTracking] scripts done (${signalCount}), waiting for DOM to settle…`);
 
-        const DOM_SETTLE_MS = 300; // ms of silence after last mutation → ready
-        const DOM_MAX_MS = 5000;   // hard ceiling for settle phase
+        const DOM_SETTLE_MS = 5000; // ms of silence after last mutation → ready
+        const DOM_MAX_MS = 10000;  // hard ceiling for settle phase
+        // Grace period before the settle clock starts. Async renderers like
+        // MathJax v2 schedule typesetting via setTimeout(0) after scripts run,
+        // so there's a window between "scripts done" and "first DOM mutation"
+        // where the settle timer would fire prematurely. The grace period ensures
+        // the MutationObserver is already resetting the timer by the time it ticks.
+        const DOM_GRACE_MS = 500;
 
         const body = iframe.contentDocument?.body;
-        if (!body) { setIframeReady(true); return; }
+        if (!body) { return; }
 
         let settleTimer: ReturnType<typeof setTimeout>;
         let domMaxTimer: ReturnType<typeof setTimeout>;
@@ -111,9 +117,14 @@ export function useIframeTracking(
         });
 
         observer.observe(body, { childList: true, subtree: true, attributes: true, characterData: true });
-        // Fires immediately if the DOM is already quiet.
-        settleTimer = setTimeout(declare, DOM_SETTLE_MS);
         domMaxTimer = setTimeout(declare, DOM_MAX_MS);
+        // Start the settle clock only after the grace period, giving async renderers
+        // time to begin mutating the DOM so the observer can take over from there.
+        setTimeout(() => {
+          settleTimer = setTimeout(declare, DOM_SETTLE_MS);
+        }, DOM_GRACE_MS);
+
+        // console.log((iWin as unknown as Record<string, unknown>).__proxy_script_executed)
       };
 
       const onSignal = (ev: Event) => {
@@ -128,9 +139,15 @@ export function useIframeTracking(
           finish();
           return;
         }
-        // Slide the quiet timer.
-        clearTimeout(quietTimer);
-        quietTimer = setTimeout(finish, SIGNAL_QUIET);
+        // Only slide the quiet timer when the expected count is unknown.
+        // When we know how many scripts to expect and haven't reached the count
+        // yet, wait for the count (or MAX_WAIT) rather than a silence window —
+        // dynamically-loaded scripts (e.g. MathJax extensions) can arrive more
+        // than 500 ms after the previous signal.
+        if (!expected || expected === 0) {
+          clearTimeout(quietTimer);
+          quietTimer = setTimeout(finish, SIGNAL_QUIET);
+        }
       };
 
       iWin.addEventListener('proxy:script-executed', onSignal);
@@ -144,10 +161,11 @@ export function useIframeTracking(
       }
 
       maxTimer = setTimeout(finish, MAX_WAIT);
-      // Always start the quiet timer. If signals arrive they will extend it;
-      // if none arrive (e.g. live-proxy pages that don't emit per-script
-      // signals) it fires after 500 ms rather than waiting the full 10 s.
-      quietTimer = setTimeout(finish, SIGNAL_QUIET);
+      // Only start the quiet timer when expected count is unknown.
+      // When we know the expected count, wait for it (or MAX_WAIT).
+      if (!expected || expected === 0) {
+        quietTimer = setTimeout(finish, SIGNAL_QUIET);
+      }
     };
 
     iframe.addEventListener('load', onLoad);
@@ -389,23 +407,35 @@ export function useClickHref(
 
 // Remove or hide cookie/consent banners inside an iframe so they don't
 // block selection on mobile. Call with the iframe ref from the Annotator.
-export function usePostprocessIframeRef(iframeRef: React.RefObject<HTMLIFrameElement | null>) {
+// `ready` must be true (i.e. useIframeTracking has declared the DOM settled)
+// before any cleanup runs, so that cleanupDoc mutations cannot interfere with
+// the settle phase and reset its timer.
+export function usePostprocessIframeRef(iframeRef: React.RefObject<HTMLIFrameElement | null>, ready: boolean) {
   const [postprocessed, setPostprocessed] = useState(false);
   const contentRef = useRef<HTMLElement>(null);
 
+  // Assign contentRef and reset postprocessed on each new iframe load.
+  // No DOM mutations here - safe to run during the settle phase.
   useEffect(() => {
+    if (!ready) return;
     const iframe = iframeRef?.current;
     if (!iframe) return;
 
     contentRef.current = findBestContentNode(iframe.contentDocument?.body ?? null);
-  })
 
+  }, [iframeRef, ready]);
+
+  // Run cleanup only after the DOM has settled (ready === true).
+  // Gating here ensures cleanupDoc mutations never reset the settle timer.
   useEffect(() => {
+    if (!ready) return;
     const iframe = iframeRef?.current;
     if (!iframe) return;
 
+    const doc = iframe.contentDocument;
+    if (!doc) { setPostprocessed(true); return; }
+
     let observer: MutationObserver | null = null;
-    let attached = false;
 
     const selectors = [
       'dialog.cc-banner[open]',
@@ -458,54 +488,38 @@ export function usePostprocessIframeRef(iframeRef: React.RefObject<HTMLIFrameEle
       } catch { }
     }
 
-    const attach = () => {
-      const doc = iframe.contentDocument;
-      if (!doc || attached) return;
-      attached = true;
+    // Prefer the best content node so we don't disturb UI chrome.
+    const targetNode = findBestContentNode(doc.body) ?? doc.body ?? doc.documentElement;
 
-      // Prefer the best content node if available so we don't remove UI
-      // elements outside the main content area (headers/sidebars/etc).
-      const targetNode = findBestContentNode(doc.body) ?? doc.body ?? doc.documentElement;
+    // Run initial cleanup now that the DOM is settled.
+    cleanupDoc(doc, targetNode);
+    setPostprocessed(true);
 
-      // Run initial cleanup targeted at the best content node
+    // Observe for later CMP injections. Re-entrancy guard prevents cleanupDoc's
+    // own mutations from re-firing the observer.
+    let cleaning = false;
+    observer = new MutationObserver(() => {
+      if (cleaning) return;
+      cleaning = true;
       cleanupDoc(doc, targetNode);
+      cleaning = false;
+    });
+    try {
+      observer.observe(targetNode, { childList: true, subtree: true, attributes: true, characterData: true });
+    } catch {
+      observer.observe(doc.body || doc.documentElement, { childList: true, subtree: true, attributes: true, characterData: true });
+    }
 
-      // Mark as postprocessed after initial cleanup so consumers can proceed
-      try { setPostprocessed(true); } catch { }
-
-      // Observe for later injections (observe the content node)
-      observer = new MutationObserver(() => cleanupDoc(doc, targetNode));
-      try {
-        observer.observe(targetNode, { childList: true, subtree: true, attributes: true, characterData: true });
-      } catch {
-        // Fallback to observing the document body if observing the target fails
-        observer.observe(doc.body || doc.documentElement, { childList: true, subtree: true, attributes: true, characterData: true });
-      }
-
-      // Also run a few delayed cleanups since some CMPs render after timers
-      const timeouts = [200, 800, 2000].map(t => window.setTimeout(() => cleanupDoc(doc, targetNode), t));
-      // store timeouts on iframe to clear later
-      (iframe as any)._postprocess_timeouts = timeouts;
-    };
-
-    const detach = () => {
-      try {
-        if (observer) { observer.disconnect(); observer = null; }
-        const timeouts: number[] = (iframe as any)._postprocess_timeouts || [];
-        timeouts.forEach(id => clearTimeout(id));
-        (iframe as any)._postprocess_timeouts = [];
-      } catch { }
-      attached = false;
-    };
-
-    iframe.addEventListener('load', attach);
-    // Attach immediately in case already loaded
-    attach();
+    // A few delayed cleanups for CMPs that inject after timers.
+    const timeouts = [200, 800, 2000].map(t => window.setTimeout(() => cleanupDoc(doc, targetNode), t));
+    (iframe as any)._postprocess_timeouts = timeouts;
 
     return () => {
-      iframe.removeEventListener('load', attach);
-      detach();
+      if (observer) { observer.disconnect(); observer = null; }
+      const stored: number[] = (iframe as any)._postprocess_timeouts || [];
+      stored.forEach(id => clearTimeout(id));
+      (iframe as any)._postprocess_timeouts = [];
     };
-  }, [iframeRef]);
+  }, [iframeRef, ready]);
   return { contentRef: contentRef as RefObject<HTMLElement>, postprocessed };
 }

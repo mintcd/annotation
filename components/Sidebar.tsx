@@ -13,8 +13,8 @@ import Dropdown from "./Dropdown";
 import { escapeAttrValue } from "../utils/string";
 import styles from "../styles/Sidebar.styles";
 
-export default function Sidebar() {
-  const { annotations, syncStatus, contentRef, onPasteHTML } = useAnnotationContext()
+export default function Sidebar({ onPasteHTML }: { onPasteHTML?: () => void }) {
+  const { annotations, syncStatus, contentRef } = useAnnotationContext()
   const [sortOption, setSortOption] = useState<SortOption>('dom-order');
   const items = useMemo(() => sortAnnotations(annotations, sortOption), [annotations, sortOption]);
   const sidebarRef = useRef<HTMLDivElement>(null);

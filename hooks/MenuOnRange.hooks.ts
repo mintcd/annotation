@@ -22,13 +22,10 @@ function useDebouncedCallback<T extends (...args: unknown[]) => void>(fn: T, del
 export function useSelection(menuRef: React.RefObject<HTMLElement | null>) {
   const [range, setRange] = useState<Range | null>(null);
   const { isMobile } = useMobile();
-  const { contentRef, addAnnotation, currentHighlightColor } = useAnnotationContext();
+  const { contentRef, contentReady, addAnnotation, currentHighlightColor } = useAnnotationContext();
 
-  const targetDoc = contentRef.current.ownerDocument;
-
-  // Centralized finalizer: read current selection and set range/position
-  const finalizeFromSelection = useCallback((ev?: Event) => {
-    const iframeWin = targetDoc.defaultView;
+  const finalizeFromSelection = useCallback(() => {
+    const iframeWin = contentRef.current?.ownerDocument?.defaultView;
     const sel = iframeWin?.getSelection();
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
       setRange(null);
@@ -37,10 +34,7 @@ export function useSelection(menuRef: React.RefObject<HTMLElement | null>) {
 
     const r = sel.getRangeAt(0).cloneRange();
     const container = contentRef.current;
-    if (!container) {
-      console.log('No container found, returning early');
-      return;
-    }
+    if (!container) return;
 
     const root = r.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
       ? (r.commonAncestorContainer as Element)
@@ -51,15 +45,8 @@ export function useSelection(menuRef: React.RefObject<HTMLElement | null>) {
       return;
     }
 
-    // Don't show if the event target is inside the menu
-    if (ev && menuRef.current && (ev.target instanceof Element) && menuRef.current.contains(ev.target)) {
-      return;
-    }
-
     setRange(r);
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [menuRef, contentRef]);
+  }, [contentRef]);
 
   // Debounced fallback used for selection handle drags on mobile
   const debouncedFinalize = useDebouncedCallback(finalizeFromSelection as (...args: unknown[]) => void, 100);
@@ -69,9 +56,8 @@ export function useSelection(menuRef: React.RefObject<HTMLElement | null>) {
     setRange(null);
   }, []);
 
-  const handlePointerUp = useCallback((e: PointerEvent) => {
-    // immediate path: try to finalize from the event
-    finalizeFromSelection(e as Event);
+  const handlePointerUp = useCallback(() => {
+    finalizeFromSelection();
   }, [finalizeFromSelection]);
 
   const handlePointerDown = useCallback((e: PointerEvent) => {
@@ -83,29 +69,30 @@ export function useSelection(menuRef: React.RefObject<HTMLElement | null>) {
   }, [menuRef]);
 
   useEffect(() => {
-    targetDoc.addEventListener("pointerdown", handlePointerDown as EventListener, { capture: true });
+    // contentReady flips false→true on each iframe load cycle, so this effect
+    // re-runs and re-attaches to the fresh document every time.
+    if (!contentReady) return;
+    const iDoc = contentRef.current?.ownerDocument;
+    if (!iDoc) return;
 
+    iDoc.addEventListener('pointerdown', handlePointerDown as EventListener, { capture: true });
     if (isMobile) {
-      // on mobile, use debounced selectionchange to finalize selection
-      targetDoc.addEventListener("selectionchange", debouncedFinalize);
-      targetDoc.addEventListener("selectionchange", handleSelectionChanging);
-
+      iDoc.addEventListener('selectionchange', debouncedFinalize);
+      iDoc.addEventListener('selectionchange', handleSelectionChanging);
     } else {
-      // on desktop, finalize immediately on pointerup
-      targetDoc.addEventListener("pointerup", handlePointerUp as EventListener, { capture: true });
+      iDoc.addEventListener('pointerup', handlePointerUp as EventListener, { capture: true });
     }
 
     return () => {
-      targetDoc.removeEventListener("pointerdown", handlePointerDown as EventListener, { capture: true });
+      iDoc.removeEventListener('pointerdown', handlePointerDown as EventListener, { capture: true });
       if (isMobile) {
-        targetDoc.removeEventListener("selectionchange", debouncedFinalize);
-        targetDoc.removeEventListener("selectionchange", handleSelectionChanging);
-
+        iDoc.removeEventListener('selectionchange', debouncedFinalize);
+        iDoc.removeEventListener('selectionchange', handleSelectionChanging);
       } else {
-        targetDoc.removeEventListener("pointerup", handlePointerUp as EventListener, { capture: true });
+        iDoc.removeEventListener('pointerup', handlePointerUp as EventListener, { capture: true });
       }
     };
-  }, [isMobile, handlePointerUp, handlePointerDown, debouncedFinalize, handleSelectionChanging, contentRef]);
+  }, [contentReady, contentRef, isMobile, handlePointerUp, handlePointerDown, debouncedFinalize, handleSelectionChanging]);
 
 
   const highlight = async () => {
