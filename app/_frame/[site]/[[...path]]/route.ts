@@ -162,11 +162,22 @@ export async function GET(
   let html: string;
   let finalUrl: string;
   try {
-    const reqHeaders: Record<string, string> = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    };
-    if (siteCookie?.trim()) reqHeaders['Cookie'] = siteCookie;
+    // Forward real browser headers so Cloudflare Bot Management doesn't flag
+    // the request as bot traffic (it checks UA, sec-ch-ua, Accept-Language etc.)
+    const FORWARD_HEADERS = [
+      'user-agent', 'accept', 'accept-language', 'accept-encoding',
+      'sec-ch-ua', 'sec-ch-ua-mobile', 'sec-ch-ua-platform',
+      'sec-fetch-dest', 'sec-fetch-mode', 'sec-fetch-site',
+      'upgrade-insecure-requests', 'cache-control', 'pragma',
+    ];
+    const reqHeaders: Record<string, string> = {};
+    for (const h of FORWARD_HEADERS) {
+      const v = request.headers.get(h);
+      if (v) reqHeaders[h] = v;
+    }
+    // Override referer/origin to the target site so it looks like direct navigation
+    reqHeaders['referer'] = siteOrigin + '/';
+    if (siteCookie?.trim()) reqHeaders['cookie'] = siteCookie;
     const upstream = await fetchWithCookies(targetUrl, reqHeaders);
     if (!upstream.ok) {
       return new Response(`Upstream error ${upstream.status} ${upstream.statusText}`, { status: 502 });
