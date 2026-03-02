@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { RefObject } from 'react';
-import { matchedRange, highlightRange, rangeToHtml } from '../utils/dom';
+import { matchedRange, highlightRange, rangeToHtml, findBestContentNode } from '../utils/dom';
 import { getPage, createOrUpdatePage } from '../utils/database';
 
 type RangeResult = {
@@ -29,11 +29,11 @@ export function useIframeTracking(
   iframeRef: RefObject<HTMLIFrameElement | null>,
   pageUrl: string,
 ): {
-  contentRef: RefObject<HTMLElement | null>;
+  // contentRef: RefObject<HTMLElement>;
   iframeReady: boolean;
   notifyMatchSuccess: (title?: string) => void;
 } {
-  const contentRef = useRef<HTMLElement | null>(null);
+  // const contentRef = useRef<HTMLElement>(null);
   const [iframeReady, setIframeReady] = useState(false);
 
   // Persisted state across loads within the same pageUrl session.
@@ -57,7 +57,7 @@ export function useIframeTracking(
     if (!iframe) return;
 
     const onLoad = () => {
-      contentRef.current = iframe.contentDocument?.body ?? null;
+      // contentRef.current = findBestContentNode(iframe.contentDocument?.body ?? null);
       setIframeReady(false);
       console.log(`[IframeTracking] iframe loaded, remoteScriptCount=${remoteScriptCountRef.current ?? 'pending'}`);
 
@@ -166,7 +166,7 @@ export function useIframeTracking(
     createOrUpdatePage(pageUrl, resolvedTitle, scriptCount)
   }, [pageUrl]);
 
-  return { contentRef, iframeReady, notifyMatchSuccess };
+  return { iframeReady, notifyMatchSuccess };
 }
 
 export function useRangeMatching(
@@ -385,4 +385,127 @@ export function useClickHref(
     el.addEventListener('click', onClick);
     return () => el.removeEventListener('click', onClick);
   }, [contentRef, onExternalHref]);
+}
+
+// Remove or hide cookie/consent banners inside an iframe so they don't
+// block selection on mobile. Call with the iframe ref from the Annotator.
+export function usePostprocessIframeRef(iframeRef: React.RefObject<HTMLIFrameElement | null>) {
+  const [postprocessed, setPostprocessed] = useState(false);
+  const contentRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const iframe = iframeRef?.current;
+    if (!iframe) return;
+
+    contentRef.current = findBestContentNode(iframe.contentDocument?.body ?? null);
+  })
+
+  useEffect(() => {
+    const iframe = iframeRef?.current;
+    if (!iframe) return;
+
+    let observer: MutationObserver | null = null;
+    let attached = false;
+
+    const selectors = [
+      'dialog.cc-banner[open]',
+      'dialog[class*="cc-banner"]',
+      '[data-cc-banner]',
+      '[class*="cookie"]',
+      '[id*="cookie"]',
+      '[class*="consent"]',
+      '[id*="consent"]',
+      '[class*="gdpr"]',
+      '[id*="gdpr"]',
+      '.cc-banner',
+      '.cookie-banner',
+      '.cookie-consent',
+      '.cookie-overlay',
+    ];
+
+    function tryRemove(el: Element | null) {
+      if (!el) return;
+      try {
+        // If it's a <dialog>, try close() first for graceful dismissal.
+        if (el instanceof HTMLDialogElement && typeof el.close === 'function') {
+          try { el.close(); } catch { }
+        }
+        el.remove();
+      } catch { }
+    }
+
+    function cleanupDoc(doc: Document | null, target?: Element | null) {
+      if (!doc) return;
+      try {
+        const root: ParentNode = (target as ParentNode) ?? doc;
+
+        // Remove matching banners within the targeted node
+        for (const s of selectors) {
+          root.querySelectorAll(s).forEach(el => tryRemove(el));
+        }
+
+        // Remove known overlays that block pointer events
+        root.querySelectorAll('.cookie-overlay, .cc-overlay, .consent-overlay').forEach(el => tryRemove(el));
+
+        // Clear inline styles that may disable scrolling on the document
+        try { doc.documentElement.style.overflow = ''; } catch { }
+        try { doc.body.style.overflow = ''; } catch { }
+        // Remove modal-like classes on <html> or <body>
+        ['modal-open', 'has-cookie-banner', 'no-scroll'].forEach(c => {
+          doc.documentElement.classList.remove(c);
+          doc.body.classList.remove(c);
+        });
+      } catch { }
+    }
+
+    const attach = () => {
+      const doc = iframe.contentDocument;
+      if (!doc || attached) return;
+      attached = true;
+
+      // Prefer the best content node if available so we don't remove UI
+      // elements outside the main content area (headers/sidebars/etc).
+      const targetNode = findBestContentNode(doc.body) ?? doc.body ?? doc.documentElement;
+
+      // Run initial cleanup targeted at the best content node
+      cleanupDoc(doc, targetNode);
+
+      // Mark as postprocessed after initial cleanup so consumers can proceed
+      try { setPostprocessed(true); } catch { }
+
+      // Observe for later injections (observe the content node)
+      observer = new MutationObserver(() => cleanupDoc(doc, targetNode));
+      try {
+        observer.observe(targetNode, { childList: true, subtree: true, attributes: true, characterData: true });
+      } catch {
+        // Fallback to observing the document body if observing the target fails
+        observer.observe(doc.body || doc.documentElement, { childList: true, subtree: true, attributes: true, characterData: true });
+      }
+
+      // Also run a few delayed cleanups since some CMPs render after timers
+      const timeouts = [200, 800, 2000].map(t => window.setTimeout(() => cleanupDoc(doc, targetNode), t));
+      // store timeouts on iframe to clear later
+      (iframe as any)._postprocess_timeouts = timeouts;
+    };
+
+    const detach = () => {
+      try {
+        if (observer) { observer.disconnect(); observer = null; }
+        const timeouts: number[] = (iframe as any)._postprocess_timeouts || [];
+        timeouts.forEach(id => clearTimeout(id));
+        (iframe as any)._postprocess_timeouts = [];
+      } catch { }
+      attached = false;
+    };
+
+    iframe.addEventListener('load', attach);
+    // Attach immediately in case already loaded
+    attach();
+
+    return () => {
+      iframe.removeEventListener('load', attach);
+      detach();
+    };
+  }, [iframeRef]);
+  return { contentRef: contentRef as RefObject<HTMLElement>, postprocessed };
 }

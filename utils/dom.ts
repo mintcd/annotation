@@ -172,7 +172,7 @@ export function rangeToHtml(range: Range | null): string {
  * This is useful to locate a content node that is not merely a wrapper
  * composed mostly of a single child block.
  */
-export function findBestTextNode(root: Element, threshold: number = 0.9, minTotal: number = 20): Element | null {
+export function findBestContentNode(root: HTMLElement | null, threshold: number = 0.9, minTotal: number = 20): HTMLElement | null {
   if (!root) return null;
 
   function nodeTextLen(n: Node | null): number {
@@ -181,18 +181,18 @@ export function findBestTextNode(root: Element, threshold: number = 0.9, minTota
     return t.trim().length;
   }
 
-  let current: Element = root;
+  let current: HTMLElement = root;
 
   while (true) {
     const currentTotal = nodeTextLen(current);
     if (currentTotal < minTotal) return current;
 
     // Look through all children to find one that accounts for >threshold of parent's text
-    let dominantChild: Element | null = null;
+    let dominantChild: HTMLElement | null = null;
     for (let child = current.firstElementChild; child; child = child.nextElementSibling) {
       const childTotal = nodeTextLen(child);
       if (currentTotal > 0 && (childTotal / currentTotal) > threshold) {
-        dominantChild = child as Element;
+        dominantChild = child as HTMLElement;
         break;
       }
     }

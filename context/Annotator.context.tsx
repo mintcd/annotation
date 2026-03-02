@@ -11,13 +11,13 @@ type AnnotationContextProps = {
   pageUrl: string;
   title?: string;
   contentReady?: boolean;
-  contentRef: React.RefObject<HTMLElement | null>;
+  contentRef: React.RefObject<HTMLElement>;
   /** Ref to the <iframe> element, when content is rendered inside one. */
   iframeRef?: React.RefObject<HTMLIFrameElement | null>;
 };
 
 type AnnotationContextType = {
-  contentRef: React.RefObject<HTMLElement | null>;
+  contentRef: React.RefObject<HTMLElement>;
   iframeRef?: React.RefObject<HTMLIFrameElement | null>;
   annotations: AnnotationItem[];
   pageUrl?: string;

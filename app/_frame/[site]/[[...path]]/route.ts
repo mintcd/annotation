@@ -139,7 +139,7 @@ export async function GET(
   let html: string;
   let finalUrl: string;
   try {
-    const headers: Record<string,string> = {
+    const headers: Record<string, string> = {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     };
     if (typeof siteCookie === 'string' && siteCookie.trim()) headers['Cookie'] = siteCookie;

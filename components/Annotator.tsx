@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useCallback, useState, useEffect, type RefObject } from 'react';
-import { useClickHref, useRangeMatching, useIframeTracking } from '../hooks/Annotator.hooks';
+import { useClickHref, useRangeMatching, useIframeTracking, usePostprocessIframeRef } from '../hooks/Annotator.hooks';
 import { AnnotationContext } from '../context/Annotator.context';
 import Sidebar from './Sidebar';
 import MenuOnRange from './MenuOnRange';
@@ -21,7 +21,10 @@ export default function Annotator({ annotations, title: titleProp, pageUrl, ifra
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [title, setTitle] = useState(titleProp ?? '');
 
-  const { contentRef, iframeReady, notifyMatchSuccess } = useIframeTracking(iframeRef, pageUrl);
+  const { iframeReady, notifyMatchSuccess } = useIframeTracking(iframeRef, pageUrl);
+
+  // Post-process iframe content (remove cookie banners, overlays, etc.)
+  const { contentRef, postprocessed: iframePostprocessed } = usePostprocessIframeRef(iframeRef);
 
   // Forward pointer and selection events from inside the iframe to the parent document
   // so that hooks listening on `document` (MenuOnRange, etc.) receive them.
@@ -71,8 +74,10 @@ export default function Annotator({ annotations, title: titleProp, pageUrl, ifra
     };
   }, [iframeUrl]);
 
+  // Enforce pipeline: wait for iframe tracking and postprocessing before matching
+  const effectiveReady = iframeReady && !!iframePostprocessed;
   const { rangeResults, allMatched, isMatching, matchedAnnotations } = useRangeMatching(
-    contentRef, annotations, iframeReady, pageUrl
+    contentRef, annotations, effectiveReady, pageUrl
   );
 
   // Write back the observed script count the first time matching fully succeeds.
@@ -113,17 +118,18 @@ export default function Annotator({ annotations, title: titleProp, pageUrl, ifra
         style={{ width: '100%', height: '100vh', border: 'none', display: 'block' }}
         title={title || 'Annotated page'}
       />
-      <AnnotationContext
-        initialAnnotations={matchedAnnotations}
-        title={title}
-        contentReady={iframeReady}
-        pageUrl={pageUrl}
-        contentRef={contentRef}
-      >
-        <Sidebar />
-        <MenuOnRange />
-        <MenuOnFocus />
-      </AnnotationContext>
+      {contentRef.current &&
+        <AnnotationContext
+          initialAnnotations={matchedAnnotations}
+          title={title}
+          contentReady={iframeReady}
+          pageUrl={pageUrl}
+          contentRef={contentRef}
+        >
+          <Sidebar />
+          <MenuOnRange />
+          <MenuOnFocus />
+        </AnnotationContext>}
 
       {pendingHref && (
         <PromptBox

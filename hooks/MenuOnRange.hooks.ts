@@ -24,12 +24,12 @@ export function useSelection(menuRef: React.RefObject<HTMLElement | null>) {
   const { isMobile } = useMobile();
   const { contentRef, addAnnotation, currentHighlightColor } = useAnnotationContext();
 
+  const targetDoc = contentRef.current.ownerDocument;
 
   // Centralized finalizer: read current selection and set range/position
   const finalizeFromSelection = useCallback((ev?: Event) => {
-    // When content is inside an <iframe>, its selection lives in the iframe's window.
-    const iframeWin = contentRef.current?.ownerDocument?.defaultView;
-    const sel = (iframeWin ?? window).getSelection();
+    const iframeWin = targetDoc.defaultView;
+    const sel = iframeWin?.getSelection();
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
       setRange(null);
       return;
@@ -59,7 +59,7 @@ export function useSelection(menuRef: React.RefObject<HTMLElement | null>) {
     setRange(r);
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [menuRef]);
+  }, [menuRef, contentRef]);
 
   // Debounced fallback used for selection handle drags on mobile
   const debouncedFinalize = useDebouncedCallback(finalizeFromSelection as (...args: unknown[]) => void, 100);
@@ -83,30 +83,29 @@ export function useSelection(menuRef: React.RefObject<HTMLElement | null>) {
   }, [menuRef]);
 
   useEffect(() => {
-
-    document.addEventListener("pointerdown", handlePointerDown as EventListener, { capture: true });
+    targetDoc.addEventListener("pointerdown", handlePointerDown as EventListener, { capture: true });
 
     if (isMobile) {
       // on mobile, use debounced selectionchange to finalize selection
-      document.addEventListener("selectionchange", debouncedFinalize);
-      document.addEventListener("selectionchange", handleSelectionChanging);
+      targetDoc.addEventListener("selectionchange", debouncedFinalize);
+      targetDoc.addEventListener("selectionchange", handleSelectionChanging);
 
     } else {
       // on desktop, finalize immediately on pointerup
-      document.addEventListener("pointerup", handlePointerUp as EventListener, { capture: true });
+      targetDoc.addEventListener("pointerup", handlePointerUp as EventListener, { capture: true });
     }
 
     return () => {
-      document.removeEventListener("pointerdown", handlePointerDown as EventListener, { capture: true });
+      targetDoc.removeEventListener("pointerdown", handlePointerDown as EventListener, { capture: true });
       if (isMobile) {
-        document.removeEventListener("selectionchange", debouncedFinalize);
-        document.removeEventListener("selectionchange", handleSelectionChanging);
+        targetDoc.removeEventListener("selectionchange", debouncedFinalize);
+        targetDoc.removeEventListener("selectionchange", handleSelectionChanging);
 
       } else {
-        document.removeEventListener("pointerup", handlePointerUp as EventListener, { capture: true });
+        targetDoc.removeEventListener("pointerup", handlePointerUp as EventListener, { capture: true });
       }
     };
-  }, [isMobile, handlePointerUp, handlePointerDown, debouncedFinalize, handleSelectionChanging]);
+  }, [isMobile, handlePointerUp, handlePointerDown, debouncedFinalize, handleSelectionChanging, contentRef]);
 
 
   const highlight = async () => {
