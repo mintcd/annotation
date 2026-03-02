@@ -37,7 +37,7 @@
     "eslint-config-next": "16.1.6",
     "react-server-dom-webpack": "^0.0.1",
     "typescript": "^5",
-    "vinext": "^0.0.0",
+    "vinext": "^0.0.18",
     "vite": "^7.3.1",
     "wrangler": "^4.69.0"
   }
