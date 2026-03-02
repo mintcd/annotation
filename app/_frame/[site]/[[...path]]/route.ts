@@ -212,7 +212,7 @@ export async function GET(
       const isSameOrigin = (() => { try { return new URL(abs).origin === pageUrl.origin; } catch { return false; } })();
       $(el).attr('href', isSameOrigin ? proxiedUrl(site, abs) : abs);
     }
-    // <a href> — rewrite to absolute so relative links don't 404 in our origin,
+    // <a href> - rewrite to absolute so relative links don't 404 in our origin,
     // but don't proxy them (navigation is handled by the parent app).
     else if (el.tagName === 'a') {
       $(el).attr('href', absoluteUrl(base, href));
