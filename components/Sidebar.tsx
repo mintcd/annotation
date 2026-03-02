@@ -14,7 +14,7 @@ import { escapeAttrValue } from "../utils/string";
 import styles from "../styles/Sidebar.styles";
 
 export default function Sidebar() {
-  const { annotations, syncStatus } = useAnnotationContext()
+  const { annotations, syncStatus, contentRef } = useAnnotationContext()
   const [sortOption, setSortOption] = useState<SortOption>('dom-order');
   const items = useMemo(() => sortAnnotations(annotations, sortOption), [annotations, sortOption]);
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -27,14 +27,19 @@ export default function Sidebar() {
   const showToggleButton = _showToggleButton || !open;
 
   const scrollToAnnotation = useCallback((id: string) => {
-    const spans = document.querySelectorAll<HTMLSpanElement>(`[data-highlight-id="${escapeAttrValue(id)}"]`);
-    const span = spans[0];
+    const escaped = escapeAttrValue(id);
     if (isMobile) setOpen(false);
 
-    if (span) {
-      span.scrollIntoView({ behavior: "instant", block: "center" });
+    if (!contentRef?.current) return;
+
+    try {
+      const spans = contentRef.current.querySelectorAll<HTMLSpanElement>(`[data-highlight-id="${escaped}"]`);
+      const span = spans[0] ?? null;
+      if (span) span.scrollIntoView({ behavior: "instant", block: "center" });
+    } catch (e) {
+      // ignore
     }
-  }, [isMobile]);
+  }, [isMobile, contentRef]);
 
   // Resizing functionality
   const handleRef = useRef<HTMLDivElement>(null);
