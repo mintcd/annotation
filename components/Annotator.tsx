@@ -30,7 +30,16 @@ export default function Annotator({ annotations, title: titleProp, pageUrl, ifra
   const iframePath = iframePathParts.slice(1).join('/');
 
   const { iframeReady, notifyMatchSuccess } = useIframeTracking(iframeRef, pageUrl);
-  const { contentRef, postprocessed: iframePostprocessed } = usePostprocessIframeRef(iframeRef, iframeReady);
+  const { contentRef, postprocessed: iframePostprocessed, docTitle } = usePostprocessIframeRef(iframeRef, iframeReady);
+
+  // When postprocessing determines the document title, update local state
+  // so downstream logic (and the iframe `title` attribute) use the
+  // authoritative title rather than falling back to the URL.
+  useEffect(() => {
+    if (docTitle && docTitle !== title) {
+      setTitle(docTitle);
+    }
+  }, [docTitle]);
 
   // Read title and detect frame errors after each iframe load.
   useEffect(() => {
@@ -62,16 +71,15 @@ export default function Annotator({ annotations, title: titleProp, pageUrl, ifra
 
   // Write back the observed script count the first time matching fully succeeds.
   useEffect(() => {
-    if (allMatched) {
-      // Prefer the local `title` state, but fall back to reading the iframe's
-      // document.title (in case it wasn't available earlier) and finally
-      // fall back to the pageUrl so the DB always has a non-empty title.
+    if (allMatched && iframeReady) {
       const iframe = iframeRef.current;
       const docTitle = iframe?.contentDocument?.title;
-      const effectiveTitle = title || docTitle || pageUrl;
+      const effectiveTitle = docTitle || title;
+      console.log("Page title", effectiveTitle);
+      document.title = effectiveTitle;
       notifyMatchSuccess(effectiveTitle);
     }
-  }, [allMatched, notifyMatchSuccess, title]);
+  }, [allMatched, notifyMatchSuccess, title, iframeReady]);
 
   const [pendingHref, setPendingHref] = useState<string | null>(null);
   const closeModal = useCallback(() => setPendingHref(null), []);

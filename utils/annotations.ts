@@ -101,8 +101,3 @@ export async function loadAnnotationsForPage(pageUrl: string): Promise<Annotatio
   }
 }
 
-// Note: saveAnnotationsForPage is now handled differently
-// The client should directly call createAnnotation/updateAnnotation/deleteAnnotation
-// from database.ts instead of saving the entire annotation array
-
-

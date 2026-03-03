@@ -174,7 +174,7 @@ export function useIframeTracking(
   const notifyMatchSuccess = useCallback((title?: string) => {
     if (notifyCalledRef.current) return; // already called this session
     notifyCalledRef.current = true;
-    const resolvedTitle = title || pageTitleRef.current || '';
+    const resolvedTitle = title || pageTitleRef.current;
 
     const scriptCount = executedScriptsRef.current > 0
       ? executedScriptsRef.current
@@ -410,6 +410,7 @@ export function useClickHref(
 // the settle phase and reset its timer.
 export function usePostprocessIframeRef(iframeRef: React.RefObject<HTMLIFrameElement | null>, ready: boolean) {
   const [postprocessed, setPostprocessed] = useState(false);
+  const [docTitle, setDocTitle] = useState<string | null>(null);
   const contentRef = useRef<HTMLElement>(null);
 
   // Assign contentRef and reset postprocessed on each new iframe load.
@@ -420,6 +421,9 @@ export function usePostprocessIframeRef(iframeRef: React.RefObject<HTMLIFrameEle
     if (!iframe) return;
 
     contentRef.current = findBestContentNode(iframe.contentDocument?.body ?? null);
+    try {
+      setDocTitle(iframe.contentDocument?.title ?? null);
+    } catch { setDocTitle(null); }
 
   }, [iframeRef, ready]);
 
@@ -431,7 +435,7 @@ export function usePostprocessIframeRef(iframeRef: React.RefObject<HTMLIFrameEle
     if (!iframe) return;
 
     const doc = iframe.contentDocument;
-    if (!doc) { setPostprocessed(true); return; }
+    if (!doc) { setPostprocessed(true); setDocTitle(null); return; }
 
     let observer: MutationObserver | null = null;
 
@@ -492,6 +496,7 @@ export function usePostprocessIframeRef(iframeRef: React.RefObject<HTMLIFrameEle
     // Run initial cleanup now that the DOM is settled.
     cleanupDoc(doc, targetNode);
     setPostprocessed(true);
+    try { setDocTitle(doc.title || null); } catch { setDocTitle(null); }
 
     // Observe for later CMP injections. Re-entrancy guard prevents cleanupDoc's
     // own mutations from re-firing the observer.
@@ -519,5 +524,5 @@ export function usePostprocessIframeRef(iframeRef: React.RefObject<HTMLIFrameEle
       (iframe as any)._postprocess_timeouts = [];
     };
   }, [iframeRef, ready]);
-  return { contentRef: contentRef as RefObject<HTMLElement>, postprocessed };
+  return { contentRef: contentRef as RefObject<HTMLElement>, postprocessed, docTitle } as const;
 }

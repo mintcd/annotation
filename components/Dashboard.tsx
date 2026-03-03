@@ -24,28 +24,16 @@ interface AnnotationPage {
 }
 
 
-
-/**
- * Look up (or create) the site slug for the given page URL via /api/websites,
- * then navigate to the clean path-based URL:
- *   https://plato.stanford.edu/entries/axiom-choice/
- *   → /plato-stanford-edu/entries/axiom-choice/
- */
 async function navigateToPage(rawUrl: string): Promise<void> {
-  try {
-    const u = new URL(rawUrl);
-    const res = await fetch('/api/websites', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ origin: u.origin }),
-    });
-    if (!res.ok) throw new Error('Failed to register website');
-    const website: { id: string } = await res.json();
-    window.location.href = `/${website.id}${u.pathname}${u.search}${u.hash}`;
-  } catch {
-    // Graceful fallback for malformed URLs
-    window.location.href = `/?url=${encodeURIComponent(rawUrl)}`;
-  }
+  const u = new URL(rawUrl);
+  const res = await fetch('/api/websites', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ origin: u.origin }),
+  });
+  if (!res.ok) throw new Error('Failed to register website');
+  const website: { id: string } = await res.json();
+  window.location.href = `/${website.id}${u.pathname}${u.search}${u.hash}`;
 }
 
 export default function Dashboard() {

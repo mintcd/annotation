@@ -50,14 +50,15 @@ export default async function SitePage({
 
   // Reconstruct the original URL and strip tracking params
   const url = normalizeUrl(appPathToPageUrl(website.origin, path, search));
-
   const framePathname = path?.length ? path.join('/') : '';
   const frameUrl = `/_frame/${site}${framePathname ? '/' + framePathname : ''}${search}`;
   const annotations = await loadAnnotationsForPage(url);
+  const pageTitle = await getPageTitle(url);
 
   return (
     <Annotator
       annotations={annotations}
+      title={pageTitle ?? undefined}
       pageUrl={url}
       iframeUrl={frameUrl}
     />
