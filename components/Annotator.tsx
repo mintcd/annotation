@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useCallback, useState, useEffect, type RefObject } from 'react';
+import { useRef, useCallback, useState, useEffect, useMemo, type RefObject } from 'react';
 import { useClickHref, useRangeMatching, useIframeTracking, usePostprocessIframeRef } from '../hooks/Annotator.hooks';
 import { AnnotationContext } from '../context/Annotator.context';
 import Sidebar from './Sidebar';
@@ -20,7 +20,7 @@ type AnnotatorProps = {
 
 export default function Annotator({ annotations, title: titleProp, pageUrl, iframeUrl }: AnnotatorProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const [title, setTitle] = useState(titleProp ?? '');
+  const [loadedTitle, setLoadedTitle] = useState('');
   const [frameError, setFrameError] = useState<string | null>(null);
   const [showPasteHTML, setShowPasteHTML] = useState(false);
 
@@ -31,15 +31,10 @@ export default function Annotator({ annotations, title: titleProp, pageUrl, ifra
 
   const { iframeReady, notifyMatchSuccess } = useIframeTracking(iframeRef, pageUrl);
   const { contentRef, postprocessed: iframePostprocessed, docTitle } = usePostprocessIframeRef(iframeRef, iframeReady);
-
-  // When postprocessing determines the document title, update local state
-  // so downstream logic (and the iframe `title` attribute) use the
-  // authoritative title rather than falling back to the URL.
-  useEffect(() => {
-    if (docTitle && docTitle !== title) {
-      setTitle(docTitle);
-    }
-  }, [docTitle]);
+  const effectiveTitle = useMemo(
+    () => docTitle || loadedTitle || titleProp || '',
+    [docTitle, loadedTitle, titleProp],
+  );
 
   // Read title and detect frame errors after each iframe load.
   useEffect(() => {
@@ -48,7 +43,7 @@ export default function Annotator({ annotations, title: titleProp, pageUrl, ifra
 
     const onLoad = () => {
       const iframeTitle = iframe.contentDocument?.title;
-      if (iframeTitle) setTitle(iframeTitle);
+      if (iframeTitle) setLoadedTitle(iframeTitle);
       const errorMeta = iframe.contentDocument?.querySelector('meta[name="frame-error"]');
       const errMsg = errorMeta?.getAttribute('content');
       if (errMsg) {
@@ -74,12 +69,12 @@ export default function Annotator({ annotations, title: titleProp, pageUrl, ifra
     if (allMatched && iframeReady) {
       const iframe = iframeRef.current;
       const docTitle = iframe?.contentDocument?.title;
-      const effectiveTitle = docTitle || title;
-      console.log("Page title", effectiveTitle);
-      document.title = effectiveTitle;
-      notifyMatchSuccess(effectiveTitle);
+      const resolvedTitle = docTitle || effectiveTitle;
+      console.log("Page title", resolvedTitle);
+      document.title = resolvedTitle;
+      notifyMatchSuccess(resolvedTitle);
     }
-  }, [allMatched, notifyMatchSuccess, title, iframeReady]);
+  }, [allMatched, notifyMatchSuccess, effectiveTitle, iframeReady]);
 
   const [pendingHref, setPendingHref] = useState<string | null>(null);
   const closeModal = useCallback(() => setPendingHref(null), []);
@@ -106,12 +101,12 @@ export default function Annotator({ annotations, title: titleProp, pageUrl, ifra
         ref={iframeRef}
         src={iframeUrl}
         style={{ width: '100%', height: '100vh', border: 'none', display: 'block' }}
-        title={title || 'Annotated page'}
+        title={effectiveTitle || 'Annotated page'}
       />
       {contentRef.current &&
         <AnnotationContext
           initialAnnotations={matchedAnnotations}
-          title={title}
+          title={effectiveTitle}
           contentReady={iframeReady}
           pageUrl={pageUrl}
           contentRef={contentRef}
