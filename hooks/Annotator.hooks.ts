@@ -57,6 +57,14 @@ export function useIframeTracking(
     if (!iframe || !iframe.contentWindow) return;
 
     const onLoad = () => {
+      // Reset per-load tracking state so a new page load starts fresh.
+      // iframeReady goes false until the new page settles; this also causes
+      // usePostprocessIframeRef to re-run its effects when ready flips back
+      // to true, ensuring contentRef and docTitle reflect the new document.
+      setIframeReady(false);
+      notifyCalledRef.current = false;
+      executedScriptsRef.current = 0;
+
       console.log(`[IframeTracking] iframe loaded, remoteScriptCount=${remoteScriptCountRef.current ?? 'pending'}`);
 
       const iWin = iframe.contentWindow;
@@ -114,7 +122,12 @@ export function useIframeTracking(
           settleTimer = setTimeout(declare, DOM_SETTLE_MS);
         });
 
-        observer.observe(body, { childList: true, subtree: true, attributes: true, characterData: true });
+        // Omit characterData: streaming pages continuously update text nodes,
+        // which would reset the settle timer on every chunk and prevent the
+        // DOM from ever being considered settled within DOM_SETTLE_MS.
+        // Structural changes (childList) and attribute changes are sufficient
+        // to detect when async renderers (e.g. MathJax, React hydration) finish.
+        observer.observe(body, { childList: true, subtree: true, attributes: true });
         domMaxTimer = setTimeout(declare, DOM_MAX_MS);
         // Start the settle clock only after the grace period, giving async renderers
         // time to begin mutating the DOM so the observer can take over from there.
@@ -479,13 +492,17 @@ export function usePostprocessIframeRef(iframeRef: React.RefObject<HTMLIFrameEle
         // Remove known overlays that block pointer events
         root.querySelectorAll('.cookie-overlay, .cc-overlay, .consent-overlay').forEach(el => tryRemove(el));
 
-        // Clear inline styles that may disable scrolling on the document
-        try { doc.documentElement.style.overflow = ''; } catch { }
-        try { doc.body.style.overflow = ''; } catch { }
-        // Remove modal-like classes on <html> or <body>
+        // Clear inline styles that may disable scrolling on the document.
+        // Guard each write so we only touch the DOM when something actually
+        // needs changing — unconditional writes cause attribute mutations that
+        // re-fire this very observer, creating an infinite loop on streaming
+        // pages that continuously reassert overflow:hidden / no-scroll.
+        try { if (doc.documentElement.style.overflow) doc.documentElement.style.overflow = ''; } catch { }
+        try { if (doc.body.style.overflow) doc.body.style.overflow = ''; } catch { }
+        // Remove modal-like classes on <html> or <body> only when present.
         ['modal-open', 'has-cookie-banner', 'no-scroll'].forEach(c => {
-          doc.documentElement.classList.remove(c);
-          doc.body.classList.remove(c);
+          if (doc.documentElement.classList.contains(c)) doc.documentElement.classList.remove(c);
+          if (doc.body.classList.contains(c)) doc.body.classList.remove(c);
         });
       } catch { }
     }
@@ -508,9 +525,13 @@ export function usePostprocessIframeRef(iframeRef: React.RefObject<HTMLIFrameEle
       cleaning = false;
     });
     try {
-      observer.observe(targetNode, { childList: true, subtree: true, attributes: true, characterData: true });
+      // Omit characterData: cookie/consent banners are injected as new DOM
+      // nodes (childList) or via attribute changes, never as raw text mutations.
+      // Including characterData would fire the callback on every streaming text
+      // update, causing cleanupDoc to run thousands of times per second.
+      observer.observe(targetNode, { childList: true, subtree: true, attributes: true });
     } catch {
-      observer.observe(doc.body || doc.documentElement, { childList: true, subtree: true, attributes: true, characterData: true });
+      observer.observe(doc.body || doc.documentElement, { childList: true, subtree: true, attributes: true });
     }
 
     // A few delayed cleanups for CMPs that inject after timers.
