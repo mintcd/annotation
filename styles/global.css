@@ -34,4 +34,6 @@ body {
 
 .highlighted-text {
   cursor: pointer;
+  padding: 0 1px;
+  border-radius: 3px;
 }
