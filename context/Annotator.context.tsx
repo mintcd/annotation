@@ -82,7 +82,7 @@ export function AnnotationContext({
         // Ensure page exists first
         let page = await getPage(pageUrl);
         if (!page) {
-          page = await createOrUpdatePage(pageUrl, title || "Annotated Page", 0);
+          page = await createOrUpdatePage({ url: pageUrl, title: title || "Annotated Page", numberOfScripts: 0 });
         }
 
         // Create annotation and get server-generated ID, including color

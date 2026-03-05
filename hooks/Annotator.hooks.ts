@@ -32,9 +32,12 @@ export function useIframeTracking(
   // contentRef: RefObject<HTMLElement>;
   iframeReady: boolean;
   notifyMatchSuccess: (title?: string) => void;
+  frameError: string | null;
+  clearFrameError: () => void;
 } {
   // const contentRef = useRef<HTMLElement>(null);
   const [iframeReady, setIframeReady] = useState(false);
+  const [frameError, setFrameError] = useState<string | null>(null);
 
   // Persisted state across loads within the same pageUrl session.
   const remoteScriptCountRef = useRef<number | null>(null); // null = fetch not done yet
@@ -57,6 +60,13 @@ export function useIframeTracking(
     if (!iframe || !iframe.contentWindow) return;
 
     const onLoad = () => {
+      // Detect frame-error meta tag early and expose it to callers.
+      try {
+        const errMsg = iframe.contentDocument?.querySelector('meta[name="frame-error"]')?.getAttribute('content') ?? null;
+        setFrameError(errMsg);
+      } catch {
+        // ignore cross-origin access errors or other DOM issues
+      }
       console.log(`[IframeTracking] iframe loaded, remoteScriptCount=${remoteScriptCountRef.current ?? 'pending'}`);
 
       const iWin = iframe.contentWindow;
@@ -179,10 +189,12 @@ export function useIframeTracking(
     const scriptCount = executedScriptsRef.current > 0
       ? executedScriptsRef.current
       : (remoteScriptCountRef.current ?? 0);
-    createOrUpdatePage(pageUrl, resolvedTitle, scriptCount)
+    createOrUpdatePage({ url: pageUrl, title: resolvedTitle, numberOfScripts: scriptCount })
   }, [pageUrl]);
 
-  return { iframeReady, notifyMatchSuccess };
+  const clearFrameError = useCallback(() => setFrameError(null), []);
+
+  return { iframeReady, notifyMatchSuccess, frameError, clearFrameError };
 }
 
 export function useRangeMatching(
@@ -371,7 +383,7 @@ export function useClickHref(
     };
 
     // If the element is an <iframe>, clicks inside it don't bubble to the parent
-    // document — attach listener to the iframe's own contentDocument instead.
+    // document - attach listener to the iframe's own contentDocument instead.
     if ((el as HTMLElement).tagName === 'IFRAME') {
       const iframe = el as HTMLIFrameElement;
       let attached = false;
@@ -403,27 +415,25 @@ export function useClickHref(
   }, [contentRef, onExternalHref]);
 }
 
-// Remove or hide cookie/consent banners inside an iframe so they don't
-// block selection on mobile. Call with the iframe ref from the Annotator.
-// `ready` must be true (i.e. useIframeTracking has declared the DOM settled)
-// before any cleanup runs, so that cleanupDoc mutations cannot interfere with
-// the settle phase and reset its timer.
-export function usePostprocessIframeRef(iframeRef: React.RefObject<HTMLIFrameElement | null>, ready: boolean) {
+// 1) Update title
+// 2) Set contentRef for range matching
+// 3) Clear cookies banners
+export function usePostprocessIframeRef(
+  iframeRef: React.RefObject<HTMLIFrameElement | null>,
+  ready: boolean,
+  title?: string,
+) {
   const [postprocessed, setPostprocessed] = useState(false);
   const [docTitle, setDocTitle] = useState<string | null>(null);
   const contentRef = useRef<HTMLElement>(null);
 
-  // Assign contentRef and reset postprocessed on each new iframe load.
-  // No DOM mutations here - safe to run during the settle phase.
   useEffect(() => {
-    if (!ready) return;
-    const iframe = iframeRef?.current;
-    if (!iframe) return;
+    const iframeBody = iframeRef?.current;
+    const iframeTitle = iframeBody?.contentDocument?.title;
+    if (!ready || !iframeBody || !iframeTitle) return;
 
-    contentRef.current = findBestContentNode(iframe.contentDocument?.body ?? null);
-    try {
-      setDocTitle(iframe.contentDocument?.title ?? null);
-    } catch { setDocTitle(null); }
+    contentRef.current = findBestContentNode(iframeBody.contentDocument?.body ?? null);
+    document.title = title || iframeTitle;
 
   }, [iframeRef, ready]);
 

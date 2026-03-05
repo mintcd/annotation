@@ -18,10 +18,8 @@ type AnnotatorProps = {
   iframeUrl: string;
 }
 
-export default function Annotator({ annotations, title: titleProp, pageUrl, iframeUrl }: AnnotatorProps) {
+export default function Annotator({ annotations, title, pageUrl, iframeUrl }: AnnotatorProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const [title, setTitle] = useState(titleProp ?? '');
-  const [frameError, setFrameError] = useState<string | null>(null);
   const [showPasteHTML, setShowPasteHTML] = useState(false);
 
   // Parse site and path from iframeUrl: /_frame/<site>/<path...>
@@ -29,39 +27,8 @@ export default function Annotator({ annotations, title: titleProp, pageUrl, ifra
   const iframeSite = iframePathParts[0];
   const iframePath = iframePathParts.slice(1).join('/');
 
-  const { iframeReady, notifyMatchSuccess } = useIframeTracking(iframeRef, pageUrl);
+  const { iframeReady, notifyMatchSuccess, frameError, clearFrameError } = useIframeTracking(iframeRef, pageUrl);
   const { contentRef, postprocessed: iframePostprocessed, docTitle } = usePostprocessIframeRef(iframeRef, iframeReady);
-
-  // When postprocessing determines the document title, update local state
-  // so downstream logic (and the iframe `title` attribute) use the
-  // authoritative title rather than falling back to the URL.
-  useEffect(() => {
-    if (docTitle && docTitle !== title) {
-      setTitle(docTitle);
-    }
-  }, [docTitle]);
-
-  // Read title and detect frame errors after each iframe load.
-  useEffect(() => {
-    const iframe = iframeRef.current;
-    if (!iframe) return;
-
-    const onLoad = () => {
-      const iframeTitle = iframe.contentDocument?.title;
-      if (iframeTitle) setTitle(iframeTitle);
-      const errorMeta = iframe.contentDocument?.querySelector('meta[name="frame-error"]');
-      const errMsg = errorMeta?.getAttribute('content');
-      if (errMsg) {
-        setFrameError(errMsg);
-        setShowPasteHTML(true);
-      } else {
-        setFrameError(null);
-      }
-    };
-
-    iframe.addEventListener('load', onLoad);
-    return () => iframe.removeEventListener('load', onLoad);
-  }, [iframeUrl]);
 
   // Enforce pipeline: wait for iframe tracking and postprocessing before matching
   const effectiveReady = iframeReady && !!iframePostprocessed;
@@ -74,12 +41,11 @@ export default function Annotator({ annotations, title: titleProp, pageUrl, ifra
     if (allMatched && iframeReady) {
       const iframe = iframeRef.current;
       const docTitle = iframe?.contentDocument?.title;
-      const effectiveTitle = docTitle || title;
-      console.log("Page title", effectiveTitle);
-      document.title = effectiveTitle;
-      notifyMatchSuccess(effectiveTitle);
+      console.log("Page title", docTitle);
+      document.title = docTitle as string;
+      notifyMatchSuccess(docTitle);
     }
-  }, [allMatched, notifyMatchSuccess, title, iframeReady]);
+  }, [allMatched, notifyMatchSuccess, iframeReady]);
 
   const [pendingHref, setPendingHref] = useState<string | null>(null);
   const closeModal = useCallback(() => setPendingHref(null), []);
@@ -127,7 +93,7 @@ export default function Annotator({ annotations, title: titleProp, pageUrl, ifra
               path={iframePath}
               onSuccess={() => {
                 setShowPasteHTML(false);
-                setFrameError(null);
+                clearFrameError();
                 if (iframeRef.current) iframeRef.current.src = iframeUrl;
               }}
               onClose={() => setShowPasteHTML(false)}

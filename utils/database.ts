@@ -58,10 +58,12 @@ export async function getPage(url: string): Promise<Page | null> {
   return await response.json();
 }
 
-export async function createOrUpdatePage(
-  url: string,
-  title: string,
-  numberOfScripts: number = 0,
+export async function createOrUpdatePage({ url, title, numberOfScripts = 0 }:
+  {
+    url: string,
+    title: string,
+    numberOfScripts: number
+  }
 ): Promise<Page> {
   const base = getBase();
   const response = await fetch(`${base}/api/pages`, {

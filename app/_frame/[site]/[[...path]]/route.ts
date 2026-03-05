@@ -64,7 +64,7 @@ function contentScript(slug: string): string {
   var base='/_proxy/'+slug;
   function rw(u){
     if(!u||typeof u!=='string')return u;
-    if(u.startsWith('/')&&!u.startsWith('//')&&!u.startsWith('/_proxy/')&&!u.startsWith('/_next/')&&!u.startsWith('/api/'))
+    if(u.startsWith('/')&&!u.startsWith('//')&&!u.startsWith('/_proxy/')&&!u.startsWith('/api/'))
       return base+u;
     return u;
   }
