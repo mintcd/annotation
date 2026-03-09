@@ -86,19 +86,6 @@ export default function Annotator({ annotations, title, pageUrl, iframeUrl }: An
           <Sidebar onPasteHTML={handlePasteHTML} />
           <MenuOnRange />
           <MenuOnFocus />
-          {showPasteHTML && (
-            <PasteHTML
-              error={frameError ?? undefined}
-              site={iframeSite}
-              path={iframePath}
-              onSuccess={() => {
-                setShowPasteHTML(false);
-                clearFrameError();
-                if (iframeRef.current) iframeRef.current.src = iframeUrl;
-              }}
-              onClose={() => setShowPasteHTML(false)}
-            />
-          )}
         </AnnotationContext>}
 
       {pendingHref && (
@@ -131,6 +118,20 @@ export default function Annotator({ annotations, title, pageUrl, iframeUrl }: An
             Paste HTML
           </button>
         </div>
+      )}
+
+      {showPasteHTML && (
+        <PasteHTML
+          error={frameError ?? undefined}
+          site={iframeSite}
+          path={iframePath}
+          onSuccess={() => {
+            setShowPasteHTML(false);
+            clearFrameError();
+            if (iframeRef.current) iframeRef.current.src = iframeUrl;
+          }}
+          onClose={() => setShowPasteHTML(false)}
+        />
       )}
     </>
   );
