@@ -29,7 +29,7 @@ export async function awaitDomSettled(iframe: HTMLIFrameElement) {
   // Wait for DOM to be idle (no mutations) for a short window
   await new Promise<void>((resolve) => {
     let timer: number | null = null;
-    const IDLE_MS = 200;
+    const IDLE_MS = 2000;
     const observer = new MutationObserver(() => {
       if (timer) window.clearTimeout(timer);
       timer = window.setTimeout(() => {
