@@ -86,3 +86,31 @@ export async function DELETE(request: Request) {
   await env.DB.prepare("DELETE FROM pages WHERE id = ?").bind(id).run();
   return json({ success: true, message: "Page deleted successfully" });
 }
+
+export async function PUT(request: Request) {
+  const env = getEnv();
+  const body = (await request.json()) as {
+    url?: string;
+    title?: string;
+    number_of_scripts?: number;
+  };
+  if (!body.url) return err("Missing required field: url", 400);
+
+  const id = await generatePageId(body.url);
+  const ts = now();
+
+  // Only update existing pages; do not create new pages here.
+  const updated = await env.DB.prepare(
+    `UPDATE pages SET
+       title = COALESCE(?, title),
+       number_of_scripts = COALESCE(?, number_of_scripts),
+       updated_at = ?
+     WHERE id = ?
+     RETURNING *`
+  )
+    .bind(body.title ?? null, body.number_of_scripts ?? null, ts, id)
+    .first<Page>();
+
+  if (!updated) return err("Page not found", 404);
+  return json(updated);
+}

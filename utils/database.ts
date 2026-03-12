@@ -1,6 +1,9 @@
 
 // On the client, relative URLs work fine.
 // On the server (Cloudflare Worker), fetch() requires absolute URLs;
+
+import { th } from "framer-motion/client";
+
 // worker/index.ts stores the request origin on globalThis.__origin.
 function getBase(): string {
   if (typeof window !== 'undefined') return '';
@@ -43,19 +46,14 @@ export async function listPages(): Promise<Page[]> {
   return await response.json();
 }
 
-export async function getPage(url: string): Promise<Page | null> {
+export async function getPage(url: string): Promise<Page> {
   const base = getBase();
   const response = await fetch(`${base}/api/pages?url=${url}`, {
     cache: 'no-store'
   });
 
-  if (response.status === 404) return null;
-
-  if (!response.ok) {
-    throw new Error(`Failed to get page: ${response.status}`);
-  }
-
-  return await response.json();
+  if (response.ok) return await response.json();
+  throw new Error(`Failed to get page: ${response}`);
 }
 
 export async function createOrUpdatePage({ url, title, numberOfScripts = 0 }:
@@ -74,6 +72,26 @@ export async function createOrUpdatePage({ url, title, numberOfScripts = 0 }:
 
   if (!response.ok) {
     throw new Error(`Failed to create page: ${response.status}`);
+  }
+
+  return await response.json();
+}
+
+export async function updatePage({ url, title, numberOfScripts }: {
+  url: string,
+  title?: string,
+  numberOfScripts?: number
+}
+): Promise<Page> {
+  const base = getBase();
+  const response = await fetch(`${base}/api/pages`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, title, number_of_scripts: numberOfScripts })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to update page: ${response.status}`);
   }
 
   return await response.json();

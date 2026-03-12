@@ -10,15 +10,17 @@ type AnnotationContextProps = {
   initialAnnotations?: AnnotationItem[];
   pageUrl: string;
   title?: string;
-  contentReady?: boolean;
   contentRef: React.RefObject<HTMLElement>;
   /** Ref to the <iframe> element, when content is rendered inside one. */
-  iframeRef?: React.RefObject<HTMLIFrameElement | null>;
+  iframeRef: React.RefObject<HTMLIFrameElement | null>;
+  /** True once the iframe has finished loading its real content. */
+  iframeReady: boolean;
 };
 
 type AnnotationContextType = {
   contentRef: React.RefObject<HTMLElement>;
-  iframeRef?: React.RefObject<HTMLIFrameElement | null>;
+  iframeRef: React.RefObject<HTMLIFrameElement | null>;
+  iframeReady: boolean;
   annotations: AnnotationItem[];
   pageUrl?: string;
   title?: string;
@@ -29,7 +31,6 @@ type AnnotationContextType = {
   updateAnnotation: (params: { id: string; comment?: string; color?: string; text?: string; html?: string }) => void;
   syncStatus: 'synced' | 'syncing' | 'to-sync';
   lastAutoSaveStatus: { success: boolean; message: string } | null;
-  contentReady: boolean;
 };
 
 const AnnotationContextProvider = createContext<AnnotationContextType | null>(null);
@@ -52,8 +53,8 @@ export function AnnotationContext({
   pageUrl,
   title,
   contentRef,
-  contentReady,
   iframeRef,
+  iframeReady,
 }: AnnotationContextProps) {
   const [annotations, setAnnotations] = useState<AnnotationItem[]>(initialAnnotations);
   const [currentHighlightColor, setCurrentHighlightColor] = useState<string>("#87ceeb");
@@ -183,6 +184,7 @@ export function AnnotationContext({
   const value = useMemo(() => ({
     contentRef,
     iframeRef,
+    iframeReady,
     annotations,
     pageUrl,
     title,
@@ -193,10 +195,9 @@ export function AnnotationContext({
     updateAnnotation,
     syncStatus,
     lastAutoSaveStatus,
-    contentReady: contentReady || false,
-  }), [contentRef, iframeRef, annotations, pageUrl, title, currentHighlightColor,
+  }), [contentRef, iframeRef, iframeReady, annotations, pageUrl, title, currentHighlightColor,
     setCurrentHighlightColor, addAnnotation, deleteAnnotation, updateAnnotation,
-    syncStatus, lastAutoSaveStatus, contentReady]);
+    syncStatus, lastAutoSaveStatus]);
 
   return (
     <AnnotationContextProvider value={value}>

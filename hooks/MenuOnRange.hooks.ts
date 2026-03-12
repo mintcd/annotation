@@ -22,10 +22,10 @@ function useDebouncedCallback<T extends (...args: unknown[]) => void>(fn: T, del
 export function useSelection(menuRef: React.RefObject<HTMLElement | null>) {
   const [range, setRange] = useState<Range | null>(null);
   const { isMobile } = useMobile();
-  const { contentRef, contentReady, addAnnotation, currentHighlightColor } = useAnnotationContext();
+  const { iframeRef, iframeReady, addAnnotation, currentHighlightColor } = useAnnotationContext();
 
   const finalizeFromSelection = useCallback(() => {
-    const iframeWin = contentRef.current?.ownerDocument?.defaultView;
+    const iframeWin = iframeRef.current?.contentWindow;
     const sel = iframeWin?.getSelection();
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
       setRange(null);
@@ -33,20 +33,23 @@ export function useSelection(menuRef: React.RefObject<HTMLElement | null>) {
     }
 
     const r = sel.getRangeAt(0).cloneRange();
-    const container = contentRef.current;
-    if (!container) return;
+    const iframeDoc = iframeRef.current?.contentDocument;
+    if (!iframeDoc) {
+      console.log("No iframe document found for selection");
+      return
+    };
 
     const root = r.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
       ? (r.commonAncestorContainer as Element)
       : r.commonAncestorContainer.parentElement;
 
-    if (!(root && container.contains(root))) {
+    if (!(root && iframeDoc.contains(root))) {
       setRange(null);
       return;
     }
 
     setRange(r);
-  }, [contentRef]);
+  }, [iframeRef]);
 
   // Debounced fallback used for selection handle drags on mobile
   const debouncedFinalize = useDebouncedCallback(finalizeFromSelection as (...args: unknown[]) => void, 100);
@@ -69,10 +72,8 @@ export function useSelection(menuRef: React.RefObject<HTMLElement | null>) {
   }, [menuRef]);
 
   useEffect(() => {
-    // contentReady flips false→true on each iframe load cycle, so this effect
-    // re-runs and re-attaches to the fresh document every time.
-    if (!contentReady) return;
-    const iDoc = contentRef.current?.ownerDocument;
+    if (!iframeReady) return;
+    const iDoc = iframeRef.current?.contentDocument;
     if (!iDoc) return;
 
     iDoc.addEventListener('pointerdown', handlePointerDown as EventListener, { capture: true });
@@ -92,7 +93,7 @@ export function useSelection(menuRef: React.RefObject<HTMLElement | null>) {
         iDoc.removeEventListener('pointerup', handlePointerUp as EventListener, { capture: true });
       }
     };
-  }, [contentReady, contentRef, isMobile, handlePointerUp, handlePointerDown, debouncedFinalize, handleSelectionChanging]);
+  }, [iframeReady, isMobile, handlePointerUp, handlePointerDown, debouncedFinalize, handleSelectionChanging]);
 
 
   const highlight = async () => {
@@ -101,7 +102,8 @@ export function useSelection(menuRef: React.RefObject<HTMLElement | null>) {
     const text = range.toString();
     const { html } = cleanedHtml(rangeToHtml(range));
 
-    const container = contentRef.current;
+    const container = iframeRef.current;
+    const iframeDoc = container?.contentDocument;
     const startEl =
       range.startContainer.nodeType === Node.ELEMENT_NODE
         ? (range.startContainer as Element)
@@ -110,12 +112,12 @@ export function useSelection(menuRef: React.RefObject<HTMLElement | null>) {
       range.endContainer.nodeType === Node.ELEMENT_NODE
         ? (range.endContainer as Element)
         : range.endContainer.parentElement;
-    if (!container || !startEl || !endEl || !container.contains(startEl) || !container.contains(endEl)) {
+    if (!iframeDoc || !startEl || !endEl || !iframeDoc.contains(startEl) || !iframeDoc.contains(endEl)) {
       return;
     }
 
     // Hide the live selection to avoid flicker while mutating DOM
-    const iframeWin = contentRef.current?.ownerDocument?.defaultView;
+    const iframeWin = iframeRef.current?.contentWindow;
     const sel = (iframeWin ?? window).getSelection();
     if (sel) sel.removeAllRanges();
 

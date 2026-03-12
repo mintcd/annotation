@@ -1,6 +1,17 @@
 import { listPages, getAnnotationsForPage, Page, Annotation } from './database';
+import { matchedRange, rangeToHtml, highlightRange } from './dom';
 
-
+export function highlightAnnotations(annotations: AnnotationItem[], container: HTMLElement) {
+  annotations.forEach(ann => {
+    const range = matchedRange(container, ann.text);
+    const html = rangeToHtml(range);
+    if (range) {
+      highlightRange(range, ann.color || '#ffff00', ann.id);
+    } else {
+      throw new Error(`Failed to match annotation: ${ann.text}`);
+    }
+  });
+}
 
 export type SortOption = 'created-asc' | 'created-desc' | 'modified-asc' | 'modified-desc' | 'dom-order';
 

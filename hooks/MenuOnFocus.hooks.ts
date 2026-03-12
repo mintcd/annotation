@@ -1,17 +1,16 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect } from "react";
 import { useAnnotationContext } from "../context/Annotator.context";
 
 export function useFocusedId() {
   const [focusedId, setFocusedId] = useState<string | null>(null);
-  const { contentRef, contentReady } = useAnnotationContext();
+  const { iframeRef, iframeReady } = useAnnotationContext();
 
-  // Set up interaction listeners (different for mobile vs desktop)
   useEffect(() => {
-    if (!contentReady) return;
-    const container = contentRef.current;
-    if (!container) return;
+    if (!iframeReady) return;
+    const iDoc = iframeRef.current?.contentDocument;
+    if (!iDoc) return;
 
     const handleInteraction = (e: Event) => {
       const target = e.target as Element;
@@ -26,7 +25,7 @@ export function useFocusedId() {
         const span = target as HTMLSpanElement;
         const id = span.dataset.highlightId;
         if (id) {
-          setFocusedId(prevId => prevId === id ? null : id); // Toggle if same span clicked
+          setFocusedId(prevId => prevId === id ? null : id);
           return;
         }
       }
@@ -37,7 +36,7 @@ export function useFocusedId() {
         const span = highlightedSpan as HTMLSpanElement;
         const id = span.dataset.highlightId;
         if (id) {
-          setFocusedId(prevId => prevId === id ? null : id); // Toggle if same span clicked
+          setFocusedId(prevId => prevId === id ? null : id);
           return;
         }
       }
@@ -46,23 +45,20 @@ export function useFocusedId() {
       setFocusedId(null);
     };
 
-    // Close menu on Escape key
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setFocusedId(null);
       }
     };
 
-    // Use pointerup (covers mouse and touch) so we handle the tap after
-    // the gesture completes and avoid racing with focus/blur on inputs.
-    container.addEventListener('pointerup', handleInteraction);
-    document.addEventListener('keydown', handleKeyDown);
+    iDoc.addEventListener('pointerup', handleInteraction);
+    iDoc.addEventListener('keydown', handleKeyDown as EventListener);
 
     return () => {
-      container.removeEventListener('pointerup', handleInteraction);
-      document.removeEventListener('keydown', handleKeyDown);
+      iDoc.removeEventListener('pointerup', handleInteraction);
+      iDoc.removeEventListener('keydown', handleKeyDown as EventListener);
     };
-  }, [contentRef, contentReady]);
+  }, [iframeReady, iframeRef]);
 
   return { focusedId, setFocusedId };
 }

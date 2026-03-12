@@ -103,16 +103,11 @@ export async function loadAnnotationsForPage(pageUrl: string): Promise<Annotatio
 
   return annotations;
 }
-
-/** Look up the stored title for a page URL. Returns null when not yet recorded. */
-export async function getPageTitle(pageUrl: string): Promise<string | null> {
+export async function getPageFromServer(pageUrl: string): Promise<{ title: string; numberOfScripts: number }> {
   const env = getEnv();
   const pageId = await generatePageId(pageUrl);
-  const page = await env.DB.prepare('SELECT title FROM pages WHERE id = ?')
+  const page = await env.DB.prepare('SELECT title, number_of_scripts FROM pages WHERE id = ?')
     .bind(pageId)
-    .first<{ title: string }>();
-  return page?.title ?? null;
+    .first<{ title: string; number_of_scripts: number }>();
+  return { title: page?.title ?? '', numberOfScripts: page?.number_of_scripts ?? 0 };
 }
-
-// Note: this file is intentionally server-only (imports next/headers). Import
-// from './api.server' only in Server Components or route handlers.

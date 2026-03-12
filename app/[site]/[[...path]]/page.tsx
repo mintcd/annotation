@@ -1,5 +1,5 @@
 import Annotator from "@/components/Annotator";
-import { getWebsiteBySlug, loadAnnotationsForPage, getPageTitle } from "@/utils/api.server";
+import { getWebsiteBySlug, loadAnnotationsForPage, getPageFromServer } from "@/utils/api.server";
 import { normalizeUrl, appPathToPageUrl } from "@/utils/url";
 import { notFound } from "next/navigation";
 
@@ -30,9 +30,9 @@ export async function generateMetadata({
   const website = await getWebsiteBySlug(site);
   if (!website) return { title: "Not Found 2" };
   const url = normalizeUrl(appPathToPageUrl(website.origin, path, search));
-  const pageTitle = await getPageTitle(url);
+  const { title } = await getPageFromServer(url);
   const fallback = new URL(url).hostname.replace(/^www\./, '');
-  return { title: pageTitle ?? `Annotating ${fallback}` };
+  return { title: title ?? `Annotating ${fallback}` };
 }
 
 export default async function SitePage({
@@ -53,12 +53,13 @@ export default async function SitePage({
   const framePathname = path?.length ? path.join('/') : '';
   const frameUrl = `/_frame/${site}${framePathname ? '/' + framePathname : ''}${search}`;
   const annotations = await loadAnnotationsForPage(url);
-  const pageTitle = await getPageTitle(url);
+  const { title, numberOfScripts } = await getPageFromServer(url);
 
   return (
     <Annotator
       annotations={annotations}
-      title={pageTitle ?? undefined}
+      title={title ?? ''}
+      remoteScriptCount={numberOfScripts}
       pageUrl={url}
       iframeUrl={frameUrl}
     />

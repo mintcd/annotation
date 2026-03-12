@@ -1,3 +1,65 @@
+
+
+export async function awaitDomSettled(iframe: HTMLIFrameElement) {
+  if (!iframe) return;
+  const doc = iframe.contentDocument;
+  if (!doc) return;
+
+  // Wait until document reports complete (if not already)
+  if (doc.readyState !== 'complete') {
+    await new Promise<void>((resolve) => {
+      const onReady = () => {
+        if (doc.readyState === 'complete') {
+          doc.removeEventListener('readystatechange', onReady);
+          resolve();
+        }
+      };
+      doc.addEventListener('readystatechange', onReady);
+    });
+  }
+
+  // Wait for document.fonts if available
+  try {
+    const fonts = (doc as any).fonts;
+    if (fonts && fonts.ready) await fonts.ready;
+  } catch (e) {
+    // ignore
+  }
+
+  // Wait for DOM to be idle (no mutations) for a short window
+  await new Promise<void>((resolve) => {
+    let timer: number | null = null;
+    const IDLE_MS = 200;
+    const observer = new MutationObserver(() => {
+      if (timer) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        observer.disconnect();
+        resolve();
+      }, IDLE_MS);
+    });
+
+    try {
+      observer.observe(doc, { childList: true, subtree: true, attributes: true, characterData: true });
+    } catch (e) {
+      // If observe fails for any reason, fall back to a short timeout
+      resolve();
+      return;
+    }
+
+    // In case there are no mutations at all, resolve after the idle window
+    timer = window.setTimeout(() => {
+      observer.disconnect();
+      resolve();
+    }, IDLE_MS);
+  });
+
+  // Ensure paints/layouts have run
+  await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  console.log("DOM settled");
+}
+
+
+
 export function shortenedHtml(html: string, maxLength: number = 150): string {
   html = (html || '').trim();
   if (!html) return '';
@@ -172,9 +234,7 @@ export function rangeToHtml(range: Range | null): string {
  * This is useful to locate a content node that is not merely a wrapper
  * composed mostly of a single child block.
  */
-export function findBestContentNode(root: HTMLElement | null, threshold: number = 0.9, minTotal: number = 20): HTMLElement | null {
-  if (!root) return null;
-
+export function findBestContentNode(root: HTMLElement, threshold: number = 0.9, minTotal: number = 20): HTMLElement {
   function nodeTextLen(n: Node | null): number {
     if (!n) return 0;
     const t = n.textContent || '';

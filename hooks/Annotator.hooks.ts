@@ -49,8 +49,8 @@ export function useIframeTracking(
   useEffect(() => {
     getPage(pageUrl)
       .then(page => {
-        remoteScriptCountRef.current = page?.number_of_scripts ?? 0;
-        pageTitleRef.current = page?.title ?? '';
+        remoteScriptCountRef.current = page.number_of_scripts ?? 0;
+        pageTitleRef.current = page.title ?? '';
       })
   }, [pageUrl]);
 
@@ -189,7 +189,7 @@ export function useIframeTracking(
     const scriptCount = executedScriptsRef.current > 0
       ? executedScriptsRef.current
       : (remoteScriptCountRef.current ?? 0);
-    createOrUpdatePage({ url: pageUrl, title: resolvedTitle, numberOfScripts: scriptCount })
+    // createOrUpdatePage({ url: pageUrl, title: resolvedTitle, numberOfScripts: scriptCount })
   }, [pageUrl]);
 
   const clearFrameError = useCallback(() => setFrameError(null), []);

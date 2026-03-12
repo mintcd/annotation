@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef, useCallback, useState, useEffect, type RefObject } from 'react';
-import { useClickHref, useRangeMatching, useIframeTracking, usePostprocessIframeRef } from '../hooks/Annotator.hooks';
+import { useRef, useCallback, useState, type RefObject } from 'react';
+import { useClickHref } from '../hooks/Annotator.hooks';
 import { AnnotationContext } from '../context/Annotator.context';
 import Sidebar from './Sidebar';
 import MenuOnRange from './MenuOnRange';
@@ -10,42 +10,28 @@ import PromptBox from './PromptBox';
 import PasteHTML from './PasteHTML';
 import annotationStyles from "../styles/Annotator.styles";
 import Loader from './Loader';
+import { getPage, updatePage } from '@/utils/database';
+import { matchedRange, rangeToHtml, highlightRange, findBestContentNode } from '@/utils/dom';
+import { awaitDomSettled } from '@/utils/dom';
+import { highlightAnnotations } from '@/utils/annotations';
 
 type AnnotatorProps = {
-  annotations?: AnnotationItem[];
-  title?: string;
+  annotations: AnnotationItem[];
+  title: string;
+  remoteScriptCount: number;
   pageUrl: string;
   iframeUrl: string;
 }
 
-export default function Annotator({ annotations, title, pageUrl, iframeUrl }: AnnotatorProps) {
+export default function Annotator({ annotations, title, remoteScriptCount, pageUrl, iframeUrl }: AnnotatorProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [showPasteHTML, setShowPasteHTML] = useState(false);
+  const [iframeReady, setIframeReady] = useState(false);
+  const [iframeError, setIframeError] = useState("");
 
   // Parse site and path from iframeUrl: /_frame/<site>/<path...>
   const iframePathParts = iframeUrl.replace(/^\/+_frame\//, '').split('?')[0].split('/');
-  const iframeSite = iframePathParts[0];
-  const iframePath = iframePathParts.slice(1).join('/');
-
-  const { iframeReady, notifyMatchSuccess, frameError, clearFrameError } = useIframeTracking(iframeRef, pageUrl);
-  const { contentRef, postprocessed: iframePostprocessed, docTitle } = usePostprocessIframeRef(iframeRef, iframeReady);
-
-  // Enforce pipeline: wait for iframe tracking and postprocessing before matching
-  const effectiveReady = iframeReady && !!iframePostprocessed;
-  const { rangeResults, allMatched, isMatching, matchedAnnotations } = useRangeMatching(
-    contentRef, annotations, effectiveReady, pageUrl
-  );
-
-  // Write back the observed script count the first time matching fully succeeds.
-  useEffect(() => {
-    if (allMatched && iframeReady) {
-      const iframe = iframeRef.current;
-      const docTitle = iframe?.contentDocument?.title;
-      console.log("Page title", docTitle);
-      document.title = docTitle as string;
-      notifyMatchSuccess(docTitle);
-    }
-  }, [allMatched, notifyMatchSuccess, iframeReady]);
+  const contentRef = useRef<HTMLElement>(null);
 
   const [pendingHref, setPendingHref] = useState<string | null>(null);
   const closeModal = useCallback(() => setPendingHref(null), []);
@@ -66,27 +52,97 @@ export default function Annotator({ annotations, title, pageUrl, iframeUrl }: An
 
   const handlePasteHTML = useCallback(() => setShowPasteHTML(true), []);
 
+  async function initAnnotatedPage(e: React.SyntheticEvent<HTMLIFrameElement>) {
+    const iframe = e.currentTarget;
+    console.log("Iframe loaded");
+
+    if (title === '') {
+      const docTitle = iframe.contentDocument?.title ?? '';
+      console.log("No stored title, using document title", docTitle);
+      updatePage({ url: pageUrl, title: docTitle });
+    }
+
+    trackScriptExecution(iframe, remoteScriptCount);
+    await awaitDomSettled(iframe);
+    highlightAnnotations(annotations, iframe.contentDocument?.body as HTMLElement);
+    contentRef.current = findBestContentNode(iframe.contentDocument?.body as HTMLElement);
+    setIframeReady(true);
+  }
+
+  function trackScriptExecution(iframe: HTMLIFrameElement, remoteScriptCount: number) {
+    console.log("Remote script count", remoteScriptCount);
+    const iWin = iframe.contentWindow as (Window & { __proxy_script_executed?: string[] });
+    const IDLE_MS = 2000; // wait this long with no new events to conclude
+    let idleTimer: number | null = null;
+    let cleanedUp = false;
+
+    const cleanup = (handler?: EventListener) => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      if (handler) iWin.removeEventListener('proxy:script-executed', handler);
+      if (idleTimer) window.clearTimeout(idleTimer);
+    };
+
+    const conclude = () => {
+      cleanup(onExec);
+      const executed = iWin.__proxy_script_executed ?? [];
+      console.log('Concluding - executed scripts:', executed.length);
+      // If this page had no recorded script count, write back the observed count.
+      if (remoteScriptCount === 0) {
+        updatePage({ url: pageUrl, numberOfScripts: executed.length });
+      }
+    };
+
+    const scheduleIdle = () => {
+      if (idleTimer) window.clearTimeout(idleTimer);
+      idleTimer = window.setTimeout(conclude, IDLE_MS);
+    };
+
+    const onExec: EventListener = () => {
+      const executed = iWin.__proxy_script_executed ?? [];
+      if (remoteScriptCount > 0 && executed.length >= remoteScriptCount) {
+        conclude();
+        return;
+      }
+      // otherwise, reset idle timer and wait for no-more-events window
+      scheduleIdle();
+    };
+
+    // Start listening and also start a fallback idle timer in case no events fire
+    iWin.addEventListener('proxy:script-executed', onExec);
+    scheduleIdle();
+
+    // cleanup if iframe navigates/reloads
+    const onFrameUnload = () => cleanup(onExec);
+    iframe.addEventListener('load', onFrameUnload);
+  }
+
   return (
     <>
       <iframe
+        id="annotated-frame"
+        onLoad={(e) => initAnnotatedPage(e)}
+        onError={(e) => {
+          setIframeError("Failed to load page");
+          setShowPasteHTML(true);
+        }}
         ref={iframeRef}
         src={iframeUrl}
         style={{ width: '100%', height: '100vh', border: 'none', display: 'block' }}
         title={title || 'Annotated page'}
       />
-      {contentRef.current &&
-        <AnnotationContext
-          initialAnnotations={matchedAnnotations}
-          title={title}
-          contentReady={iframeReady}
-          pageUrl={pageUrl}
-          contentRef={contentRef}
-          iframeRef={iframeRef}
-        >
-          <Sidebar onPasteHTML={handlePasteHTML} />
-          <MenuOnRange />
-          <MenuOnFocus />
-        </AnnotationContext>}
+      <AnnotationContext
+        initialAnnotations={annotations}
+        title={title}
+        pageUrl={pageUrl}
+        contentRef={contentRef as React.RefObject<HTMLElement>}
+        iframeRef={iframeRef as React.RefObject<HTMLIFrameElement>}
+        iframeReady={iframeReady}
+      >
+        <Sidebar onPasteHTML={handlePasteHTML} />
+        <MenuOnRange />
+        <MenuOnFocus />
+      </AnnotationContext>
 
       {pendingHref && (
         <PromptBox
@@ -105,10 +161,9 @@ export default function Annotator({ annotations, title, pageUrl, iframeUrl }: An
         />
       )}
 
-      {(!allMatched && !isMatching) && (
-        <Loader />)}
+      {!iframeReady && <Loader />}
 
-      {frameError && !showPasteHTML && (
+      {iframeError && !showPasteHTML && (
         <div style={{ position: 'fixed', bottom: 16, right: 16, zIndex: 40, background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 8, padding: '0.5rem 1rem', fontSize: '0.8rem' }}>
           Page failed to load.{' '}
           <button
@@ -122,12 +177,12 @@ export default function Annotator({ annotations, title, pageUrl, iframeUrl }: An
 
       {showPasteHTML && (
         <PasteHTML
-          error={frameError ?? undefined}
-          site={iframeSite}
-          path={iframePath}
+          error={iframeError}
+          site={pageUrl}
+          path={iframePathParts.slice(1).join('/')}
           onSuccess={() => {
             setShowPasteHTML(false);
-            clearFrameError();
+            setIframeError("");
             if (iframeRef.current) iframeRef.current.src = iframeUrl;
           }}
           onClose={() => setShowPasteHTML(false)}
