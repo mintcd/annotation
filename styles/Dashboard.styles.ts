@@ -108,6 +108,7 @@ export default {
     fontSize: '0.875rem',
     border: 'none',
     cursor: 'pointer',
+
   },
 
   annotateButtonHover: {

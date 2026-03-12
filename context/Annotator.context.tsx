@@ -3,7 +3,7 @@
 import { createContext, useContext, ReactNode } from "react";
 import { useCallback, useState, useMemo, useEffect, useRef } from "react";
 import { removeHighlights } from "../utils/dom";
-import { createAnnotation, updateAnnotation as updateAnnotationAPI, deleteAnnotation as deleteAnnotationAPI, createOrUpdatePage, getPage } from "../utils/database";
+import { createAnnotation, updateAnnotation as updateAnnotationAPI, deleteAnnotation as deleteAnnotationAPI, getPage, updatePage } from "../utils/database";
 
 type AnnotationContextProps = {
   children: ReactNode;
@@ -80,11 +80,12 @@ export function AnnotationContext({
     // Return temp ID immediately and a promise for the final ID
     const promise = (async () => {
       try {
-        // Ensure page exists first
-        let page = await getPage(pageUrl);
-        if (!page) {
-          page = await createOrUpdatePage({ url: pageUrl, title: title || "Annotated Page", numberOfScripts: 0 });
+        // Only update the page if it already exists. Dashboard is responsible for creating pages.
+        const existingPage = await getPage(pageUrl);
+        if (existingPage) {
+          await updatePage({ url: pageUrl, title: title || "Annotated Page", numberOfScripts: 0 });
         }
+
 
         // Create annotation and get server-generated ID, including color
         const serverAnnotation = await createAnnotation(pageUrl, text, html, color);

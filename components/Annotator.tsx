@@ -59,7 +59,11 @@ export default function Annotator({ annotations, title, remoteScriptCount, pageU
     if (title === '') {
       const docTitle = iframe.contentDocument?.title ?? '';
       console.log("No stored title, using document title", docTitle);
-      updatePage({ url: pageUrl, title: docTitle });
+      // Only update the page if it already exists; Dashboard creates pages.
+      (async () => {
+        const existing = await getPage(pageUrl);
+        if (existing) await updatePage({ url: pageUrl, title: docTitle });
+      })();
     }
 
     trackScriptExecution(iframe, remoteScriptCount);
@@ -89,7 +93,11 @@ export default function Annotator({ annotations, title, remoteScriptCount, pageU
       console.log('Concluding - executed scripts:', executed.length);
       // If this page had no recorded script count, write back the observed count.
       if (remoteScriptCount === 0) {
-        updatePage({ url: pageUrl, numberOfScripts: executed.length });
+        // Only update the page's script count if the page already exists; Dashboard creates pages.
+        (async () => {
+          const existing = await getPage(pageUrl);
+          if (existing) await updatePage({ url: pageUrl, numberOfScripts: executed.length });
+        })();
       }
     };
 

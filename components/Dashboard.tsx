@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from 'framer-motion';
 import { Folder, ChevronDown, ChevronRight } from '../app/icons';
 import { useClient, useMobile } from "../hooks";
-import { deletePage as deletePageAPI, deleteAnnotation as deleteAnnotationAPI, updateAnnotation as updateAnnotationAPI } from '../utils/database';
+import { deletePage as deletePageAPI, deleteAnnotation as deleteAnnotationAPI, updateAnnotation as updateAnnotationAPI, createPage } from '../utils/database';
 import PromptBox from './PromptBox';
 import AnnotationList from './AnnotationList';
 import styles from '../styles/Dashboard.styles';
@@ -31,6 +31,7 @@ async function navigateToPage(rawUrl: string): Promise<void> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ origin: u.origin }),
   });
+
   if (!res.ok) throw new Error('Failed to register website');
   const website: { id: string } = await res.json();
   window.location.href = `/${website.id}${u.pathname}${u.search}${u.hash}`;
@@ -293,6 +294,12 @@ export default function Dashboard() {
     }
   }
 
+  async function saveAndNavigateToPage(rawUrl: string) {
+    const normalized = normalizeUrl(rawUrl);
+    await createPage({ url: normalized })
+    navigateToPage(normalized);
+  }
+
   return (
     <div style={styles.container(isMobile)}>
       {/* Mobile backdrop */}
@@ -352,14 +359,13 @@ export default function Dashboard() {
                       onBlur={(e) => e.currentTarget.style.boxShadow = 'none'}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
-                          const url = (e.currentTarget as HTMLInputElement).value.trim();
-                          if (url) navigateToPage(url);
+                          saveAndNavigateToPage(enterUrl);
                         }
                       }}
                     />
                     <button
                       type="button"
-                      onClick={() => { const url = enterUrl.trim(); if (url) navigateToPage(url); }}
+                      onClick={() => saveAndNavigateToPage(enterUrl)}
                       style={styles.annotateButton}
                       onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#1D4ED8'}
                       onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#2563EB'}
@@ -502,14 +508,13 @@ export default function Dashboard() {
                 onBlur={(e) => e.currentTarget.style.boxShadow = 'none'}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
-                    const url = (e.currentTarget as HTMLInputElement).value.trim();
-                    if (url) navigateToPage(url);
+                    saveAndNavigateToPage(enterUrl);
                   }
                 }}
               />
               <button
                 type="button"
-                onClick={() => { const url = enterUrl.trim(); if (url) navigateToPage(url); }}
+                onClick={() => saveAndNavigateToPage(enterUrl)}
                 style={styles.annotateButton}
                 onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#1D4ED8'}
                 onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#2563EB'}
@@ -663,7 +668,7 @@ export default function Dashboard() {
                 {/* Action buttons - Mobile responsive */}
                 <div style={styles.actionButtons}>
                   <button
-                    onClick={() => navigateToPage(displayedUrl)}
+                    onClick={() => saveAndNavigateToPage(displayedUrl)}
                     style={styles.viewPageButton}
                     onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#1D4ED8'}
                     onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#2563EB'}
@@ -722,14 +727,13 @@ export default function Dashboard() {
                       onBlur={(e) => e.currentTarget.style.boxShadow = 'none'}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {
-                          const url = (e.currentTarget as HTMLInputElement).value.trim();
-                          if (url) navigateToPage(url);
+                          saveAndNavigateToPage(enterUrl);
                         }
                       }}
                     />
                     <button
                       type="button"
-                      onClick={() => { const url = enterUrl.trim(); if (url) navigateToPage(url); }}
+                      onClick={() => saveAndNavigateToPage(enterUrl)}
                       style={styles.emptyStateAnnotateButton}
                       onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#1D4ED8'}
                       onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#2563EB'}

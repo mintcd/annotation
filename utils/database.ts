@@ -56,11 +56,11 @@ export async function getPage(url: string): Promise<Page> {
   throw new Error(`Failed to get page: ${response}`);
 }
 
-export async function createOrUpdatePage({ url, title, numberOfScripts = 0 }:
+export async function createPage({ url, title = "", numberOfScripts = 0 }:
   {
     url: string,
-    title: string,
-    numberOfScripts: number
+    title?: string,
+    numberOfScripts?: number
   }
 ): Promise<Page> {
   const base = getBase();
