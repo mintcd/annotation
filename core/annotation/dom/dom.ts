@@ -29,7 +29,7 @@ export function convertRangeToHtml(range: Range): string {
  * This is useful to locate a content node that is not merely a wrapper
  * composed mostly of a single child block.
  */
-export function findBestContentNode(root: HTMLElement, threshold: number = 0.8, minTotal: number = 20): HTMLElement {
+export function findBestContentNode(root: HTMLElement, threshold: number = 0.85, minTotal: number = 20): HTMLElement {
 
   function nodeTextLen(n: Node | null): number {
     if (!n) return 0;

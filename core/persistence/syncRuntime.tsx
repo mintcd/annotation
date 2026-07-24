@@ -66,21 +66,38 @@ export function SyncEngineProvider({ children }: { children: ReactNode }) {
   const [sessionReady, setSessionReady] = useState(false);
 
   const loadSession = useCallback(async (): Promise<SyncSession> => {
-    const response = await fetch("/api/auth/session", {
-      cache: "no-store",
-      credentials: "same-origin",
-      headers: { accept: "application/json" },
-    });
-    if (!response.ok) {
-      throw new Error(`session endpoint returned HTTP ${response.status}`);
+    // If the browser is offline return an anonymous session immediately so
+    // the app can render from IndexedDB data without hitting the network.
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return syncSessionForUserId(undefined);
     }
-    const body = (await response.json()) as Partial<SyncSession>;
-    const session = syncSessionForUserId(
-      typeof body.userId === "string" ? body.userId : undefined,
-    );
-    return typeof body.username === "string" && body.username.trim() !== ""
-      ? { ...session, username: body.username }
-      : session;
+
+    try {
+      const response = await fetch("/api/auth/session", {
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: { accept: "application/json" },
+      });
+      if (!response.ok) {
+        throw new Error(`session endpoint returned HTTP ${response.status}`);
+      }
+      const body = (await response.json()) as Partial<SyncSession>;
+      const session = syncSessionForUserId(
+        typeof body.userId === "string" ? body.userId : undefined,
+      );
+      return typeof body.username === "string" && body.username.trim() !== ""
+        ? { ...session, username: body.username }
+        : session;
+    } catch (err) {
+      // Network failure (e.g. offline) — return anonymous session so the
+      // app shell can still render from locally-cached IndexedDB data.
+      const isNetworkError = err instanceof TypeError;
+      if (isNetworkError || !navigator.onLine) {
+        console.warn("[session] Network unavailable, using anonymous session", err);
+        return syncSessionForUserId(undefined);
+      }
+      throw err;
+    }
   }, []);
 
   const refreshSession = useCallback(async (): Promise<SyncSession> => {
