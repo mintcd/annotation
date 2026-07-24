@@ -13,117 +13,117 @@
 // ─── Sync-engine worker (handles push/pull background sync) ───────────────
 importScripts('/sw.sync.js');
 
-// ─── Workbox (bundled locally via vite-plugin-pwa, never from CDN) ────────
-importScripts('https://storage.googleapis.com/workbox-cdn/releases/7.3.0/workbox-sw.js');
+// // ─── Workbox (bundled locally via vite-plugin-pwa, never from CDN) ────────
+// importScripts('https://storage.googleapis.com/workbox-cdn/releases/7.3.0/workbox-sw.js');
 
-workbox.setConfig({ debug: false });
+// workbox.setConfig({ debug: false });
 
-const { precacheAndRoute, cleanupOutdatedCaches } = workbox.precaching;
-const { registerRoute, NavigationRoute } = workbox.routing;
-const { NetworkFirst, CacheFirst, StaleWhileRevalidate } = workbox.strategies;
-const { ExpirationPlugin } = workbox.expiration;
+// const { precacheAndRoute, cleanupOutdatedCaches } = workbox.precaching;
+// const { registerRoute, NavigationRoute } = workbox.routing;
+// const { NetworkFirst, CacheFirst, StaleWhileRevalidate } = workbox.strategies;
+// const { ExpirationPlugin } = workbox.expiration;
 
-// ─── Skip-waiting support ─────────────────────────────────────────────────
-// ServiceWorkerRegister.tsx sends this message when a new SW is installed
-// so users get updates immediately instead of waiting for all tabs to close.
-self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SKIP_WAITING') {
-    self.skipWaiting();
-  }
-});
+// // ─── Skip-waiting support ─────────────────────────────────────────────────
+// // ServiceWorkerRegister.tsx sends this message when a new SW is installed
+// // so users get updates immediately instead of waiting for all tabs to close.
+// self.addEventListener('message', (event) => {
+//   if (event.data && event.data.type === 'SKIP_WAITING') {
+//     self.skipWaiting();
+//   }
+// });
 
-// ─── Precache the app shell ────────────────────────────────────────────────
-// self.__WB_MANIFEST is replaced at build time by vite-plugin-pwa with the
-// list of versioned assets. During `dev`, VitePWA injects an empty array so
-// this line is still valid.
-cleanupOutdatedCaches();
-precacheAndRoute(self.__WB_MANIFEST);
+// // ─── Precache the app shell ────────────────────────────────────────────────
+// // self.__WB_MANIFEST is replaced at build time by vite-plugin-pwa with the
+// // list of versioned assets. During `dev`, VitePWA injects an empty array so
+// // this line is still valid.
+// cleanupOutdatedCaches();
+// precacheAndRoute(self.__WB_MANIFEST);
 
-// ─── Navigation (SPA) fallback ────────────────────────────────────────────
-// For any navigation request that isn't a frame or proxy URL, serve the
-// precached root. This makes the app shell load offline.
-const appShellHandler = new NetworkFirst({
-  cacheName: 'app-shell-v1',
-  plugins: [
-    new ExpirationPlugin({ maxEntries: 10, maxAgeSeconds: 7 * 24 * 60 * 60 }),
-  ],
-});
+// // ─── Navigation (SPA) fallback ────────────────────────────────────────────
+// // For any navigation request that isn't a frame or proxy URL, serve the
+// // precached root. This makes the app shell load offline.
+// const appShellHandler = new NetworkFirst({
+//   cacheName: 'app-shell-v1',
+//   plugins: [
+//     new ExpirationPlugin({ maxEntries: 10, maxAgeSeconds: 7 * 24 * 60 * 60 }),
+//   ],
+// });
 
-registerRoute(
-  new NavigationRoute(async (context) => {
-    const url = new URL(context.request.url);
-    // Frame and proxy routes are handled by the frame-cache logic below
-    if (
-      url.pathname.startsWith('/frame/') ||
-      url.pathname.startsWith('/proxy/')
-    ) {
-      return fetch(context.request).catch(async () => {
-        const cache = await caches.open('html-snapshots-v1');
-        const cached = await cache.match(context.request);
-        return cached ?? new Response('Offline: snapshot not found.', { status: 503 });
-      });
-    }
+// registerRoute(
+//   new NavigationRoute(async (context) => {
+//     const url = new URL(context.request.url);
+//     // Frame and proxy routes are handled by the frame-cache logic below
+//     if (
+//       url.pathname.startsWith('/frame/') ||
+//       url.pathname.startsWith('/proxy/')
+//     ) {
+//       return fetch(context.request).catch(async () => {
+//         const cache = await caches.open('html-snapshots-v1');
+//         const cached = await cache.match(context.request);
+//         return cached ?? new Response('Offline: snapshot not found.', { status: 503 });
+//       });
+//     }
 
-    try {
-      return await appShellHandler.handle(context);
-    } catch {
-      // Last-resort offline page served from precache
-      const cached = await caches.match('/') ?? await caches.match('/index.html');
-      if (cached) return cached;
+//     try {
+//       return await appShellHandler.handle(context);
+//     } catch {
+//       // Last-resort offline page served from precache
+//       const cached = await caches.match('/') ?? await caches.match('/index.html');
+//       if (cached) return cached;
 
-      return new Response(
-        '<!doctype html><html><head><title>Offline</title></head><body>' +
-        '<h1>You are offline</h1>' +
-        '<p>The app could not load. Please reconnect and refresh.</p>' +
-        '</body></html>',
-        { headers: { 'Content-Type': 'text/html' } },
-      );
-    }
-  }),
-);
+//       return new Response(
+//         '<!doctype html><html><head><title>Offline</title></head><body>' +
+//         '<h1>You are offline</h1>' +
+//         '<p>The app could not load. Please reconnect and refresh.</p>' +
+//         '</body></html>',
+//         { headers: { 'Content-Type': 'text/html' } },
+//       );
+//     }
+//   }),
+// );
 
-// ─── Static assets: JS/CSS/fonts (cache-first, long TTL) ──────────────────
-registerRoute(
-  ({ request }) =>
-    request.destination === 'script' ||
-    request.destination === 'style' ||
-    request.destination === 'font',
-  new CacheFirst({
-    cacheName: 'static-assets-v1',
-    plugins: [
-      new ExpirationPlugin({
-        maxEntries: 60,
-        maxAgeSeconds: 30 * 24 * 60 * 60, // 30 days
-      }),
-    ],
-  }),
-);
+// // ─── Static assets: JS/CSS/fonts (cache-first, long TTL) ──────────────────
+// registerRoute(
+//   ({ request }) =>
+//     request.destination === 'script' ||
+//     request.destination === 'style' ||
+//     request.destination === 'font',
+//   new CacheFirst({
+//     cacheName: 'static-assets-v1',
+//     plugins: [
+//       new ExpirationPlugin({
+//         maxEntries: 60,
+//         maxAgeSeconds: 30 * 24 * 60 * 60, // 30 days
+//       }),
+//     ],
+//   }),
+// );
 
-// ─── Images (stale-while-revalidate) ──────────────────────────────────────
-registerRoute(
-  ({ request }) => request.destination === 'image',
-  new StaleWhileRevalidate({
-    cacheName: 'images-v1',
-    plugins: [
-      new ExpirationPlugin({ maxEntries: 100, maxAgeSeconds: 30 * 24 * 60 * 60 }),
-    ],
-  }),
-);
+// // ─── Images (stale-while-revalidate) ──────────────────────────────────────
+// registerRoute(
+//   ({ request }) => request.destination === 'image',
+//   new StaleWhileRevalidate({
+//     cacheName: 'images-v1',
+//     plugins: [
+//       new ExpirationPlugin({ maxEntries: 100, maxAgeSeconds: 30 * 24 * 60 * 60 }),
+//     ],
+//   }),
+// );
 
-// ─── API routes: session endpoint (network-first with offline fallback) ───
-// The session endpoint is called on every app boot. Return a cached 200
-// anonymous session when offline so the app can render from IndexedDB data
-// without showing an unrecoverable error.
-registerRoute(
-  ({ url }) => url.pathname === '/api/auth/session',
-  new NetworkFirst({
-    cacheName: 'api-session-v1',
-    networkTimeoutSeconds: 5,
-    plugins: [
-      new ExpirationPlugin({ maxEntries: 1, maxAgeSeconds: 24 * 60 * 60 }),
-    ],
-  }),
-);
+// // ─── API routes: session endpoint (network-first with offline fallback) ───
+// // The session endpoint is called on every app boot. Return a cached 200
+// // anonymous session when offline so the app can render from IndexedDB data
+// // without showing an unrecoverable error.
+// registerRoute(
+//   ({ url }) => url.pathname === '/api/auth/session',
+//   new NetworkFirst({
+//     cacheName: 'api-session-v1',
+//     networkTimeoutSeconds: 5,
+//     plugins: [
+//       new ExpirationPlugin({ maxEntries: 1, maxAgeSeconds: 24 * 60 * 60 }),
+//     ],
+//   }),
+// );
 
 // ─── Frame-cache logic ─────────────────────────────────────────────────────
 // This large IIFE handles caching of annotated HTML frames and their assets.

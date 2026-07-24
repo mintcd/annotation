@@ -29,7 +29,7 @@ export type OutboundFetchResult = {
   readonly finalUrl: URL;
 };
 
-const DEFAULT_MAX_REDIRECTS = 5;
+const DEFAULT_MAX_REDIRECTS = 10;
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_SAFE_PORT = 65535;
 
@@ -94,47 +94,61 @@ export async function fetchOutboundUrl(
     ...requestInit
   } = options;
 
-  let currentUrl = validateOutboundUrl(rawUrl);
+  const currentUrl = validateOutboundUrl(rawUrl);
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-  try {
-    for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
-      const response = await fetchOnce(fetchImpl, currentUrl, {
-        ...requestInit,
-        redirect: 'manual',
-        signal: controller.signal,
-      });
+  const response = await fetchOnce(fetchImpl, currentUrl, {
+    ...requestInit,
+    // redirect: 'manual',
+    // signal: controller.signal,
+  });
 
-      if (isRedirect(response.status)) {
-        if (redirectCount === maxRedirects) {
-          throw new OutboundFetchError('Outbound URL redirected too many times.', 508);
-        }
+  // if (response.ok && allowedContentTypes) {
+  //   validateContentType(response, allowedContentTypes, allowMissingContentType);
+  // }
 
-        const location = response.headers.get('location');
-        if (!location) {
-          throw new OutboundFetchError('Outbound URL redirect is missing a location.', 502);
-        }
+  return { response, finalUrl: currentUrl };
 
-        currentUrl = validateOutboundUrl(new URL(location, currentUrl));
-        continue;
-      }
 
-      if (maxBytes !== undefined) {
-        validateContentLength(response, maxBytes);
-      }
+  // try {
+  //   for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount += 1) {
+  //     const response = await fetchOnce(fetchImpl, currentUrl, {
+  //       ...requestInit,
+  //       redirect: 'manual',
+  //       signal: controller.signal,
+  //     });
 
-      if (response.ok && allowedContentTypes) {
-        validateContentType(response, allowedContentTypes, allowMissingContentType);
-      }
+  //     if (isRedirect(response.status)) {
+  //       if (redirectCount === maxRedirects) {
+  //         throw new OutboundFetchError('Outbound URL redirected too many times.', 508);
+  //       }
 
-      return { response, finalUrl: currentUrl };
-    }
-  } finally {
-    clearTimeout(timeout);
-  }
+  //       const location = response.headers.get('location');
+  //       if (!location) {
+  //         throw new OutboundFetchError('Outbound URL redirect is missing a location.', 502);
+  //       }
 
-  throw new OutboundFetchError('Outbound URL redirected too many times.', 508);
+  //       currentUrl = validateOutboundUrl(new URL(location, currentUrl));
+  //       continue;
+  //     }
+
+  //     if (maxBytes !== undefined) {
+  //       validateContentLength(response, maxBytes);
+  //     }
+
+  //     if (response.ok && allowedContentTypes) {
+  //       validateContentType(response, allowedContentTypes, allowMissingContentType);
+  //     }
+
+  //     return { response, finalUrl: currentUrl };
+  //   }
+  // } finally {
+  //   clearTimeout(timeout);
+  // }
+
+  // throw new OutboundFetchError('Outbound URL redirected too many times.', 508);
 }
 
 export async function readResponseArrayBuffer(

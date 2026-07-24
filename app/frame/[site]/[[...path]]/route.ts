@@ -147,27 +147,23 @@ export async function GET(
   );
   const siteCookie: string | null = cookieRow ? cookieRow.cookie : null;
 
-  // ── 1. Resolve origin ──────────────────────────────────────────────────
-  let siteOrigin: string;
+  // Resolve origin
   let storedHtml: string | null = null;
-  try {
 
-    const row = findSyncStateRow<{ origin: string }>(
-      state,
-      'websites',
-      'id',
-      site,
-    );
-    if (!row) return frameErrorResponse(`Unknown site: ${site}`);
-    siteOrigin = row.origin;
+  const row = findSyncStateRow<{ origin: string }>(
+    state,
+    'websites',
+    'id',
+    site,
+  );
+  if (!row) return frameErrorResponse(`Unknown site: ${site}`);
 
-    // ── Check R2 bucket for user-pasted HTML ───────────────────────────
-    const r2Key = scopedWebpageStorageKey(session.userId, site, path, upstreamSearch);
-    const stored = await env.WEBPAGES_BUCKET.get(r2Key);
-    if (stored) storedHtml = await stored.text();
-  } catch {
-    return frameErrorResponse('Database unavailable');
-  }
+  const siteOrigin = row.origin;
+
+  // Check R2 bucket for user-pasted HTML
+  const r2Key = scopedWebpageStorageKey(session.userId, site, path, upstreamSearch);
+  const stored = await env.WEBPAGES_BUCKET.get(r2Key);
+  if (stored) storedHtml = await stored.text();
 
   // ── 2. Fetch upstream HTML ─────────────────────────────────────────────
   const pathname = path?.length ? '/' + path.join('/') : '/';
@@ -201,9 +197,6 @@ export async function GET(
 
       const { response: upstream, finalUrl: upstreamUrl } = await fetchOutboundUrl(targetUrl, {
         headers: reqHeaders,
-        maxBytes: FRAME_MAX_HTML_BYTES,
-        maxRedirects: FRAME_MAX_REDIRECTS,
-        timeoutMs: FRAME_FETCH_TIMEOUT_MS,
         allowedContentTypes: ['text/html', 'application/xhtml+xml'],
         allowMissingContentType: true,
       });
