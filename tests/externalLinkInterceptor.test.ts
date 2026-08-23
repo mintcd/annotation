@@ -30,6 +30,19 @@ test('prefers an external document base over the canonical source page key', () 
   );
 });
 
+test('preserves a directory path when resolving an anchored relative link', () => {
+  assert.equal(
+    resolveExternalLinkHref('./#Fata', {
+      appOrigin,
+      sourcePageUrl: 'https://plato.stanford.edu/entries/time',
+      sourceBaseUrl: 'https://plato.stanford.edu/entries/time/',
+      documentBaseUrl: `${appOrigin}/plato-stanford-edu/entries/time/`,
+      documentUrl: `${appOrigin}/frame/plato-stanford-edu/entries/time`,
+    }),
+    'https://plato.stanford.edu/entries/time/#Fata',
+  );
+});
+
 test('ignores app-internal, fragment, javascript, and non-web links', () => {
   assert.equal(
     resolveExternalLinkHref(`${appOrigin}/dashboard`, { appOrigin, sourcePageUrl }),

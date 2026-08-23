@@ -10,7 +10,7 @@ import {
 } from 'react-icons/fi';
 import ActionDialog from './ActionDialog';
 import { dashboardCss } from './styles/Dashboard.styles';
-import { normalizeUrl } from '../core/utils/url';
+import { normalizeUrl, toAnnotatorPath } from '../core/utils/url';
 import PageDetail from "./dashboard/PageDetail";
 import PageLibrary from "./dashboard/PageLibrary";
 import type { AnnotationPage, EditingCommentState } from "./dashboard/types";
@@ -60,10 +60,10 @@ async function navigateToPage(
   const absoluteUrl = toAbsoluteUrl(rawUrl);
   if (!absoluteUrl) throw new Error('Please enter a valid URL');
 
-  const u = new URL(absoluteUrl);
-  const website = await getOrCreateWebsite(u.origin, runtime);
+  const sourceUrl = new URL(absoluteUrl);
+  const website = await getOrCreateWebsite(sourceUrl.origin, runtime);
   await ensureWebsiteAvailableForRoute(website);
-  window.location.href = `/${website.id}${u.pathname}${u.search}${u.hash}`;
+  window.location.href = toAnnotatorPath(website.id, absoluteUrl);
 }
 
 export default function Dashboard() {
@@ -587,7 +587,7 @@ function AuthenticatedDashboard() {
       const normalized = normalizeUrl(absoluteUrl);
 
       await ensurePage(normalized, '', runtime);
-      await navigateToPage(normalized, runtime);
+      await navigateToPage(absoluteUrl, runtime);
     } catch (error) {
       alert(`Error opening page: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }

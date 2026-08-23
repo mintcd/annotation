@@ -43,6 +43,17 @@ export function normalizeUrl(url: string): string {
   }
 };
 
+export function toAnnotatorPath(
+  siteId: string,
+  sourceUrl: string,
+  canonicalUrl = normalizeUrl(sourceUrl),
+): string {
+  const source = new URL(sourceUrl);
+  const canonical = new URL(canonicalUrl);
+  const pathname = source.pathname === '/' ? '' : source.pathname;
+  return `/${encodeURIComponent(siteId)}${pathname}${canonical.search}${source.hash}`;
+}
+
 // ─── Site-slug helpers ───────────────────────────────────────────────────────
 
 /**

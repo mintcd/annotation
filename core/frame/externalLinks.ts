@@ -1,9 +1,12 @@
 export type ExternalLinkResolutionOptions = {
   appOrigin: string;
   sourcePageUrl?: string;
+  sourceBaseUrl?: string;
   documentBaseUrl?: string;
   documentUrl?: string;
 };
+
+export const FRAME_SOURCE_BASE_META_NAME = 'annotation-source-base';
 
 function originOf(value: string | undefined): string | null {
   if (!value) return null;
@@ -17,9 +20,15 @@ function originOf(value: string | undefined): string | null {
 function linkResolutionBase({
   appOrigin,
   sourcePageUrl,
+  sourceBaseUrl,
   documentBaseUrl,
   documentUrl,
 }: ExternalLinkResolutionOptions): string | undefined {
+  const sourceBaseOrigin = originOf(sourceBaseUrl);
+  if (sourceBaseUrl && sourceBaseOrigin && sourceBaseOrigin !== appOrigin) {
+    return sourceBaseUrl;
+  }
+
   const documentBaseOrigin = originOf(documentBaseUrl);
   if (documentBaseUrl && documentBaseOrigin && documentBaseOrigin !== appOrigin) {
     return documentBaseUrl;

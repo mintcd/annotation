@@ -27,7 +27,7 @@ import {
   type AppSyncRuntime,
 } from '../../persistence';
 import { ensureFrameCacheReady, refreshFrameBundle } from '../../frame/cache';
-import { normalizeUrl } from '../../utils/url';
+import { normalizeUrl, toAnnotatorPath } from '../../utils/url';
 import { applyAnnotationHighlights, type AnnotationHighlightFailure } from './highlights';
 import { shouldAdoptPreparedPageTitle, storedPageTitle } from './title';
 
@@ -522,11 +522,10 @@ export function useAnnotationSession({
     const normalized = normalizeUrl(href);
     await ensurePage(normalized, '', runtime);
 
-    const url = new URL(normalized);
-    const website = await getOrCreateWebsite(url.origin, runtime);
+    const sourceUrl = new URL(href);
+    const website = await getOrCreateWebsite(sourceUrl.origin, runtime);
     await ensureWebsiteAvailableForRoute(website);
-    const pathname = url.pathname === '/' ? '' : url.pathname;
-    window.location.href = `/${website.id}${pathname}${url.search}`;
+    window.location.href = toAnnotatorPath(website.id, href, normalized);
   }, [runtime]);
 
   const openOriginal = useCallback((href: string) => {

@@ -1,5 +1,8 @@
 import { findBestContentNode } from '../../annotation/dom';
-import { resolveExternalLinkHref } from '../externalLinks';
+import {
+  FRAME_SOURCE_BASE_META_NAME,
+  resolveExternalLinkHref,
+} from '../externalLinks';
 export { applyFrameDarkMode } from '../darkMode';
 
 const COOKIE_BANNER_SELECTORS = [
@@ -164,6 +167,9 @@ export function startExternalLinkInterceptor(
     const href = resolveExternalLinkHref(anchor?.getAttribute('href'), {
       appOrigin,
       sourcePageUrl: options.sourcePageUrl,
+      sourceBaseUrl: doc
+        .querySelector<HTMLMetaElement>(`meta[name="${FRAME_SOURCE_BASE_META_NAME}"]`)
+        ?.content,
       documentBaseUrl: anchor?.ownerDocument.baseURI,
       documentUrl: anchor?.ownerDocument.location?.href,
     });
