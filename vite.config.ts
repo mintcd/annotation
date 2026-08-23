@@ -43,51 +43,51 @@ export default defineConfig({
         childEnvironments: ["ssr"],
       },
     }),
-    // VitePWA({
-    //   // Use injectManifest to keep your custom Cloudflare D1/IndexedDB sync logic
-    //   strategies: 'injectManifest',
-    //   srcDir: 'public',
-    //   filename: 'sw.js',
-    //   // Registration is handled manually in ServiceWorkerRegister.tsx so we
-    //   // can control the update lifecycle (skip-waiting + controlled reload).
-    //   registerType: 'prompt',
-    //   injectManifest: {
-    //     // Defines which compiled assets to precache
-    //     globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-    //     // Exclude sw.sync.js from precache list (it's imported directly by sw.js)
-    //     globIgnores: ['sw.sync.js'],
-    //   },
-    //   manifest: {
-    //     name: 'HTML Annotation App',
-    //     short_name: 'Annotator',
-    //     description: 'Offline-capable HTML annotation tool - annotate and highlight any web page',
-    //     theme_color: '#000000',
-    //     background_color: '#0f0f13',
-    //     display: 'standalone',
-    //     orientation: 'any',
-    //     scope: '/',
-    //     start_url: '/',
-    //     categories: ['productivity', 'utilities'],
-    //     icons: [
-    //       {
-    //         src: '/favicon.ico',
-    //         sizes: '64x64 32x32 24x24 16x16',
-    //         type: 'image/x-icon'
-    //       },
-    //       {
-    //         src: '/icon-192x192.png',
-    //         type: 'image/png',
-    //         sizes: '192x192',
-    //         purpose: 'any maskable',
-    //       },
-    //       {
-    //         src: '/icon-512x512.png',
-    //         type: 'image/png',
-    //         sizes: '512x512',
-    //         purpose: 'any maskable',
-    //       }
-    //     ]
-    //   }
-    // })
+    VitePWA({
+      // Use injectManifest to keep your custom Cloudflare D1/IndexedDB sync logic
+      strategies: 'injectManifest',
+      srcDir: 'public',
+      filename: 'sw.js',
+      // Registration is handled manually in ServiceWorkerRegister.tsx so we
+      // can control the update lifecycle (skip-waiting + controlled reload).
+      registerType: 'prompt',
+      injectManifest: {
+        // Defines which compiled assets to precache
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // Exclude sw.sync.js from precache list (it's imported directly by sw.js)
+        globIgnores: ['sw.sync.js'],
+      },
+      manifest: {
+        name: 'HTML Annotation App',
+        short_name: 'Annotator',
+        description: 'Offline-capable HTML annotation tool - annotate and highlight any web page',
+        theme_color: '#000000',
+        background_color: '#0f0f13',
+        display: 'standalone',
+        orientation: 'any',
+        scope: '/',
+        start_url: '/',
+        categories: ['productivity', 'utilities'],
+        icons: [
+          {
+            src: '/favicon.ico',
+            sizes: '64x64 32x32 24x24 16x16',
+            type: 'image/x-icon'
+          },
+          {
+            src: '/icon-192x192.png',
+            type: 'image/png',
+            sizes: '192x192',
+            purpose: 'any maskable',
+          },
+          {
+            src: '/icon-512x512.png',
+            type: 'image/png',
+            sizes: '512x512',
+            purpose: 'any maskable',
+          }
+        ]
+      }
+    })
   ],
 });

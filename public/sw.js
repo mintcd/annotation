@@ -5,130 +5,140 @@
  * worker separate lets this file add page caching without generator output
  * overwriting it.
  *
- * Workbox is injected at build time by vite-plugin-pwa (injectManifest
- * strategy). The `self.__WB_MANIFEST` placeholder is replaced with the
- * actual list of precached assets produced by the build.
+ * Workbox is imported from local npm packages (bundled by vite-plugin-pwa at
+ * build time via Rollup). This means Workbox is never fetched from a CDN, so
+ * caching strategies continue to work even when the device is offline.
+ *
+ * importScripts('/sw.sync.js') is a classic-worker runtime call. Rollup
+ * leaves it as-is in the IIFE output, so it still runs at SW startup.
  */
 
 // ─── Sync-engine worker (handles push/pull background sync) ───────────────
 importScripts('/sw.sync.js');
 
-// // ─── Workbox (bundled locally via vite-plugin-pwa, never from CDN) ────────
-// importScripts('https://storage.googleapis.com/workbox-cdn/releases/7.3.0/workbox-sw.js');
+// ─── Workbox — locally bundled, never from CDN ────────────────────────────
+import { precacheAndRoute, cleanupOutdatedCaches } from 'workbox-precaching';
+import {
+  registerRoute,
+  NavigationRoute,
+} from 'workbox-routing';
+import {
+  NetworkFirst,
+  CacheFirst,
+  StaleWhileRevalidate,
+} from 'workbox-strategies';
+import { ExpirationPlugin } from 'workbox-expiration';
 
-// workbox.setConfig({ debug: false });
+// ─── Skip-waiting support ─────────────────────────────────────────────────
+// ServiceWorkerRegister.tsx sends this when a new SW is installed so users
+// get updates immediately instead of waiting for all tabs to close.
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
 
-// const { precacheAndRoute, cleanupOutdatedCaches } = workbox.precaching;
-// const { registerRoute, NavigationRoute } = workbox.routing;
-// const { NetworkFirst, CacheFirst, StaleWhileRevalidate } = workbox.strategies;
-// const { ExpirationPlugin } = workbox.expiration;
+// ─── Precache the app shell ────────────────────────────────────────────────
+// self.__WB_MANIFEST is replaced at build time by vite-plugin-pwa with the
+// versioned list of every JS/CSS/HTML/font/image asset in the build output.
+cleanupOutdatedCaches();
+precacheAndRoute(self.__WB_MANIFEST);
 
-// // ─── Skip-waiting support ─────────────────────────────────────────────────
-// // ServiceWorkerRegister.tsx sends this message when a new SW is installed
-// // so users get updates immediately instead of waiting for all tabs to close.
-// self.addEventListener('message', (event) => {
-//   if (event.data && event.data.type === 'SKIP_WAITING') {
-//     self.skipWaiting();
-//   }
-// });
+// ─── Navigation (SPA) fallback ────────────────────────────────────────────
+// For any page navigation that isn't a frame/proxy URL, serve the precached
+// root document so the app shell loads offline.
+const appShellHandler = new NetworkFirst({
+  cacheName: 'app-shell-v1',
+  plugins: [
+    new ExpirationPlugin({ maxEntries: 10, maxAgeSeconds: 7 * 24 * 60 * 60 }),
+  ],
+});
 
-// // ─── Precache the app shell ────────────────────────────────────────────────
-// // self.__WB_MANIFEST is replaced at build time by vite-plugin-pwa with the
-// // list of versioned assets. During `dev`, VitePWA injects an empty array so
-// // this line is still valid.
-// cleanupOutdatedCaches();
-// precacheAndRoute(self.__WB_MANIFEST);
+registerRoute(
+  new NavigationRoute(async (context) => {
+    const url = new URL(context.request.url);
+    // Frame and proxy routes are handled by the frame-cache IIFE below
+    if (
+      url.pathname.startsWith('/frame/') ||
+      url.pathname.startsWith('/proxy/')
+    ) {
+      return fetch(context.request).catch(async () => {
+        const cache = await caches.open('html-snapshots-v1');
+        const cached = await cache.match(context.request);
+        return (
+          cached ??
+          new Response('Offline: snapshot not found.', { status: 503 })
+        );
+      });
+    }
 
-// // ─── Navigation (SPA) fallback ────────────────────────────────────────────
-// // For any navigation request that isn't a frame or proxy URL, serve the
-// // precached root. This makes the app shell load offline.
-// const appShellHandler = new NetworkFirst({
-//   cacheName: 'app-shell-v1',
-//   plugins: [
-//     new ExpirationPlugin({ maxEntries: 10, maxAgeSeconds: 7 * 24 * 60 * 60 }),
-//   ],
-// });
+    try {
+      return await appShellHandler.handle(context);
+    } catch {
+      // Last-resort offline page served from precache
+      const cached =
+        (await caches.match('/')) ?? (await caches.match('/index.html'));
+      if (cached) return cached;
 
-// registerRoute(
-//   new NavigationRoute(async (context) => {
-//     const url = new URL(context.request.url);
-//     // Frame and proxy routes are handled by the frame-cache logic below
-//     if (
-//       url.pathname.startsWith('/frame/') ||
-//       url.pathname.startsWith('/proxy/')
-//     ) {
-//       return fetch(context.request).catch(async () => {
-//         const cache = await caches.open('html-snapshots-v1');
-//         const cached = await cache.match(context.request);
-//         return cached ?? new Response('Offline: snapshot not found.', { status: 503 });
-//       });
-//     }
+      return new Response(
+        '<!doctype html><html><head><title>Offline</title></head><body>' +
+          '<h1>You are offline</h1>' +
+          '<p>The app could not load. Please reconnect and refresh.</p>' +
+          '</body></html>',
+        { headers: { 'Content-Type': 'text/html' } },
+      );
+    }
+  }),
+);
 
-//     try {
-//       return await appShellHandler.handle(context);
-//     } catch {
-//       // Last-resort offline page served from precache
-//       const cached = await caches.match('/') ?? await caches.match('/index.html');
-//       if (cached) return cached;
+// ─── Static assets: JS/CSS/fonts (cache-first, long TTL) ──────────────────
+registerRoute(
+  ({ request }) =>
+    request.destination === 'script' ||
+    request.destination === 'style' ||
+    request.destination === 'font',
+  new CacheFirst({
+    cacheName: 'static-assets-v1',
+    plugins: [
+      new ExpirationPlugin({
+        maxEntries: 60,
+        maxAgeSeconds: 30 * 24 * 60 * 60, // 30 days
+      }),
+    ],
+  }),
+);
 
-//       return new Response(
-//         '<!doctype html><html><head><title>Offline</title></head><body>' +
-//         '<h1>You are offline</h1>' +
-//         '<p>The app could not load. Please reconnect and refresh.</p>' +
-//         '</body></html>',
-//         { headers: { 'Content-Type': 'text/html' } },
-//       );
-//     }
-//   }),
-// );
+// ─── Images (stale-while-revalidate) ──────────────────────────────────────
+registerRoute(
+  ({ request }) => request.destination === 'image',
+  new StaleWhileRevalidate({
+    cacheName: 'images-v1',
+    plugins: [
+      new ExpirationPlugin({
+        maxEntries: 100,
+        maxAgeSeconds: 30 * 24 * 60 * 60,
+      }),
+    ],
+  }),
+);
 
-// // ─── Static assets: JS/CSS/fonts (cache-first, long TTL) ──────────────────
-// registerRoute(
-//   ({ request }) =>
-//     request.destination === 'script' ||
-//     request.destination === 'style' ||
-//     request.destination === 'font',
-//   new CacheFirst({
-//     cacheName: 'static-assets-v1',
-//     plugins: [
-//       new ExpirationPlugin({
-//         maxEntries: 60,
-//         maxAgeSeconds: 30 * 24 * 60 * 60, // 30 days
-//       }),
-//     ],
-//   }),
-// );
-
-// // ─── Images (stale-while-revalidate) ──────────────────────────────────────
-// registerRoute(
-//   ({ request }) => request.destination === 'image',
-//   new StaleWhileRevalidate({
-//     cacheName: 'images-v1',
-//     plugins: [
-//       new ExpirationPlugin({ maxEntries: 100, maxAgeSeconds: 30 * 24 * 60 * 60 }),
-//     ],
-//   }),
-// );
-
-// // ─── API routes: session endpoint (network-first with offline fallback) ───
-// // The session endpoint is called on every app boot. Return a cached 200
-// // anonymous session when offline so the app can render from IndexedDB data
-// // without showing an unrecoverable error.
-// registerRoute(
-//   ({ url }) => url.pathname === '/api/auth/session',
-//   new NetworkFirst({
-//     cacheName: 'api-session-v1',
-//     networkTimeoutSeconds: 5,
-//     plugins: [
-//       new ExpirationPlugin({ maxEntries: 1, maxAgeSeconds: 24 * 60 * 60 }),
-//     ],
-//   }),
-// );
+// ─── Session endpoint (network-first, offline-tolerant) ───────────────────
+// Cached so the app can render from IndexedDB data when offline without
+// hitting an unrecoverable session error on the loading screen.
+registerRoute(
+  ({ url }) => url.pathname === '/api/auth/session',
+  new NetworkFirst({
+    cacheName: 'api-session-v1',
+    networkTimeoutSeconds: 5,
+    plugins: [
+      new ExpirationPlugin({ maxEntries: 1, maxAgeSeconds: 24 * 60 * 60 }),
+    ],
+  }),
+);
 
 // ─── Frame-cache logic ─────────────────────────────────────────────────────
-// This large IIFE handles caching of annotated HTML frames and their assets.
-// It is intentionally kept below the Workbox routes so Workbox routing takes
-// priority for app-shell navigations.
+// Handles caching of annotated HTML frames and their sub-resources.
+// Placed after Workbox routes so app-shell navigations take priority.
 (() => {
   'use strict';
 
@@ -168,18 +178,13 @@ importScripts('/sw.sync.js');
   const refreshUntilByFrame = new Map();
 
   self.addEventListener('activate', (event) => {
-    // Cache cleanup must never prevent the composed sync worker from
-    // activating when storage is unavailable or corrupted.
     event.waitUntil(cleanOldFrameCaches().catch(() => undefined));
   });
 
   self.addEventListener('message', (event) => {
     const data = event.data;
     if (!data || typeof data.type !== 'string') return;
-
-    // SKIP_WAITING is already handled above; ignore it here to avoid
-    // double-processing.
-    if (data.type === 'SKIP_WAITING') return;
+    if (data.type === 'SKIP_WAITING') return; // handled above
 
     if (data.type === 'ANNOTATION_FRAME_CACHE_PING') {
       reply(event, {
@@ -191,33 +196,41 @@ importScripts('/sw.sync.js');
     }
 
     if (data.type === 'ANNOTATION_FRAME_REFRESH_ASSETS') {
-      event.waitUntil(beginAssetRefresh(data).then(
-        (result) => reply(event, {
-          type: 'ANNOTATION_FRAME_REFRESH_READY',
-          requestId: data.requestId,
-          ...result,
-        }),
-        (error) => reply(event, {
-          type: 'ANNOTATION_FRAME_REFRESH_ERROR',
-          requestId: data.requestId,
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      ));
+      event.waitUntil(
+        beginAssetRefresh(data).then(
+          (result) =>
+            reply(event, {
+              type: 'ANNOTATION_FRAME_REFRESH_READY',
+              requestId: data.requestId,
+              ...result,
+            }),
+          (error) =>
+            reply(event, {
+              type: 'ANNOTATION_FRAME_REFRESH_ERROR',
+              requestId: data.requestId,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+        ),
+      );
       return;
     }
 
     if (data.type === 'ANNOTATION_FRAME_CACHE_DELETE') {
-      event.waitUntil(deleteFrameCache(data.frameUrl).then(
-        () => reply(event, {
-          type: 'ANNOTATION_FRAME_CACHE_DELETED',
-          requestId: data.requestId,
-        }),
-        (error) => reply(event, {
-          type: 'ANNOTATION_FRAME_CACHE_DELETE_ERROR',
-          requestId: data.requestId,
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      ));
+      event.waitUntil(
+        deleteFrameCache(data.frameUrl).then(
+          () =>
+            reply(event, {
+              type: 'ANNOTATION_FRAME_CACHE_DELETED',
+              requestId: data.requestId,
+            }),
+          (error) =>
+            reply(event, {
+              type: 'ANNOTATION_FRAME_CACHE_DELETE_ERROR',
+              requestId: data.requestId,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+        ),
+      );
     }
   });
 
@@ -246,13 +259,13 @@ importScripts('/sw.sync.js');
     } catch {
       return fetch(event.request);
     }
-
     const cached = await matchSafely(cache, event.request);
     if (cached) {
-      event.waitUntil(refreshWebsiteLogo(cache, event.request).catch(() => undefined));
+      event.waitUntil(
+        refreshWebsiteLogo(cache, event.request).catch(() => undefined),
+      );
       return cached;
     }
-
     return refreshWebsiteLogo(cache, event.request);
   }
 
@@ -273,11 +286,9 @@ importScripts('/sw.sync.js');
     } catch {
       return fetch(event.request);
     }
-
     if (!client || !isFrameDocumentUrl(client.url)) {
       return fetch(event.request);
     }
-
     return serveFrameRequest(event, client.url);
   }
 
@@ -299,11 +310,13 @@ importScripts('/sw.sync.js');
       return replaceFromNetwork(cache, request, isDocument);
     }
 
-    const refreshAssets = !isDocument
-      && await isAssetRefreshActive(frameId).catch(() => false);
+    const refreshAssets =
+      !isDocument && (await isAssetRefreshActive(frameId).catch(() => false));
     if (isDocument && request.cache === 'reload') {
-      await beginAssetRefresh({ frameUrl, durationMs: DEFAULT_REFRESH_WINDOW_MS })
-        .catch(() => undefined);
+      await beginAssetRefresh({
+        frameUrl,
+        durationMs: DEFAULT_REFRESH_WINDOW_MS,
+      }).catch(() => undefined);
     }
     if (refreshAssets || request.cache === 'reload') {
       return networkFirst(cache, request, isDocument, refreshAssets);
@@ -327,7 +340,12 @@ importScripts('/sw.sync.js');
     return response;
   }
 
-  async function networkFirst(cache, request, isDocument, bypassHttpCache = false) {
+  async function networkFirst(
+    cache,
+    request,
+    isDocument,
+    bypassHttpCache = false,
+  ) {
     try {
       const networkRequest = bypassHttpCache
         ? new Request(request, { cache: 'reload' })
@@ -337,7 +355,6 @@ importScripts('/sw.sync.js');
         await putSafely(cache, request, response.clone());
         return response;
       }
-
       const cached = await matchSafely(cache, request);
       return cached || response;
     } catch (error) {
@@ -349,16 +366,19 @@ importScripts('/sw.sync.js');
 
   function canStore(response, isDocument) {
     if (!(response.ok || response.type === 'opaque')) return false;
-    if (isDocument && response.headers.get(FRAME_ERROR_HEADER) === '1') return false;
+    if (isDocument && response.headers.get(FRAME_ERROR_HEADER) === '1')
+      return false;
     return response.status !== 206 && response.headers.get('vary') !== '*';
   }
 
   function canStoreLogo(response) {
     const contentType = response.headers.get('content-type') || '';
-    return response.ok
-      && response.status !== 206
-      && response.headers.get('vary') !== '*'
-      && contentType.toLowerCase().startsWith('image/');
+    return (
+      response.ok &&
+      response.status !== 206 &&
+      response.headers.get('vary') !== '*' &&
+      contentType.toLowerCase().startsWith('image/')
+    );
   }
 
   async function matchSafely(cache, request) {
@@ -391,10 +411,12 @@ importScripts('/sw.sync.js');
     refreshUntilByFrame.set(frameId, until);
     try {
       const controlCache = await caches.open(CONTROL_CACHE);
-      await controlCache.put(controlRequest(frameId), new Response(String(until)));
+      await controlCache.put(
+        controlRequest(frameId),
+        new Response(String(until)),
+      );
     } catch {
-      // The in-memory marker still refreshes the current load. Persistence is
-      // only needed if the browser stops the worker during that short window.
+      // In-memory marker still refreshes the current load.
     }
 
     return { frameId, until };
@@ -434,29 +456,37 @@ importScripts('/sw.sync.js');
       const controlCache = await caches.open(CONTROL_CACHE);
       await controlCache.delete(controlRequest(frameId));
     } catch {
-      // The page bundle is already gone; stale refresh metadata will expire.
+      // Stale refresh metadata will expire naturally.
     }
   }
 
   async function cleanOldFrameCaches() {
     const names = await caches.keys();
-    await Promise.all(names.map((name) => {
-      const isOldVersion = name.startsWith(FRAME_CACHE_FAMILY)
-        && !name.startsWith(FRAME_CACHE_PREFIX);
-      const isOldControlCache = name.startsWith(CONTROL_CACHE_FAMILY)
-        && name !== CONTROL_CACHE;
-      const isOldLogoCache = name.startsWith(LOGO_CACHE_FAMILY)
-        && name !== LOGO_CACHE;
-      return name === LEGACY_CACHE || isOldVersion || isOldControlCache
-        || isOldLogoCache
-        ? caches.delete(name)
-        : Promise.resolve(false);
-    }));
+    await Promise.all(
+      names.map((name) => {
+        const isOldVersion =
+          name.startsWith(FRAME_CACHE_FAMILY) &&
+          !name.startsWith(FRAME_CACHE_PREFIX);
+        const isOldControlCache =
+          name.startsWith(CONTROL_CACHE_FAMILY) && name !== CONTROL_CACHE;
+        const isOldLogoCache =
+          name.startsWith(LOGO_CACHE_FAMILY) && name !== LOGO_CACHE;
+        return name === LEGACY_CACHE ||
+          isOldVersion ||
+          isOldControlCache ||
+          isOldLogoCache
+          ? caches.delete(name)
+          : Promise.resolve(false);
+      }),
+    );
   }
 
   function controlRequest(frameId) {
     return new Request(
-      new URL(`/__annotation_frame_cache__/refresh/${frameId}`, self.location.origin),
+      new URL(
+        `/__annotation_frame_cache__/refresh/${frameId}`,
+        self.location.origin,
+      ),
     );
   }
 
@@ -469,8 +499,10 @@ importScripts('/sw.sync.js');
   function isFrameDocumentUrl(value) {
     try {
       const url = new URL(value, self.location.origin);
-      return url.origin === self.location.origin
-        && url.pathname.startsWith(FRAME_PATH_PREFIX);
+      return (
+        url.origin === self.location.origin &&
+        url.pathname.startsWith(FRAME_PATH_PREFIX)
+      );
     } catch {
       return false;
     }
@@ -479,9 +511,11 @@ importScripts('/sw.sync.js');
   function isWebsiteLogoUrl(value) {
     try {
       const url = new URL(value, self.location.origin);
-      return url.origin === self.location.origin
-        && url.pathname === LOGO_PATH
-        && url.searchParams.has('url');
+      return (
+        url.origin === self.location.origin &&
+        url.pathname === LOGO_PATH &&
+        url.searchParams.has('url')
+      );
     } catch {
       return false;
     }

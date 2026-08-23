@@ -52,8 +52,10 @@ export default function OfflineBanner() {
   // This avoids a synchronous setState call inside the effect (which would
   // trigger a second render cycle and violate the lint rule).
   const [state, setState] = useState<'offline' | 'online' | null>(
-    () => (typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : null),
+    null
   );
+
+
 
   useEffect(() => {
 
@@ -70,7 +72,7 @@ export default function OfflineBanner() {
       window.removeEventListener('offline', handleOffline);
       window.removeEventListener('online', handleOnline);
     };
-  }, []);
+  });
 
   if (state === null) return null;
 

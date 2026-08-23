@@ -16,6 +16,7 @@ import {
 } from '@/core/net/outboundFetch';
 import { getEnv } from '@/core/utils/env';
 import { stripFrameCacheScopeFromSearch } from '@/core/frame/cacheScope';
+import { injectFrameDarkModeStyles } from '@/core/frame/darkModeProxy';
 import { scopedWebpageStorageKey } from '@/core/frame/pastedHtml';
 import {
   isSameOriginUrl,
@@ -230,6 +231,7 @@ export async function GET(
     $s('base').remove();
     // Inject base tag so relative assets still resolve against the source page.
     $s('head').prepend(`<base href=${JSON.stringify(targetUrl)}>`);
+    injectFrameDarkModeStyles($s);
     return new Response($s.html(), {
       status: 200,
       headers: {
@@ -332,6 +334,7 @@ export async function GET(
     $(el).text(rewriteCssUrls(style, base, proxiedFrameResourceUrl));
   });
 
+  injectFrameDarkModeStyles($);
   const rewritten = $.html();
   return new Response(rewritten, {
     status: 200,

@@ -27,7 +27,7 @@ export default function RootLayout({ children }: {
         </SyncEngineProvider>
         {/* PWA: register SW and show offline/online status */}
         <ServiceWorkerRegister />
-        {/* <OfflineBanner /> */}
+        <OfflineBanner />
       </body>
     </html>
   );
